@@ -8,8 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ragnarok-ecosystem/tyr/internal/audit"
 	"github.com/ragnarok-ecosystem/tyr/internal/precommit"
 	"github.com/ragnarok-ecosystem/tyr/internal/registry"
+	"github.com/ragnarok-ecosystem/tyr/internal/sast"
+	"github.com/ragnarok-ecosystem/tyr/internal/security"
 )
 
 func (s *Server) handlePkgCheck(ctx context.Context, req *Request) (*Response, error) {
@@ -179,12 +182,30 @@ func (s *Server) handlePkgAudit(ctx context.Context, req *Request) (*Response, e
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.ProjectPath == "" {
+		params.ProjectPath = "."
+	}
+
+	result, err := audit.AuditProject(params.ProjectPath)
+	if err != nil {
+		return &Response{
+			Result: map[string]interface{}{
+				"project_path": params.ProjectPath,
+				"error":        err.Error(),
+			},
+		}, nil
+	}
+
 	return &Response{
 		Result: map[string]interface{}{
 			"project_path":    params.ProjectPath,
+			"package_file":    result.PackageFile,
+			"format":          result.Source,
+			"total_packages":  result.TotalPackages,
+			"dev_packages":    result.DevPackages,
+			"packages":        result.Packages,
 			"vulnerabilities": []interface{}{},
 			"total_vulns":     0,
-			"note":            "pkg_audit requires package-lock.json or similar",
 		},
 	}, nil
 }
@@ -236,13 +257,44 @@ func (s *Server) handleSastRun(ctx context.Context, req *Request) (*Response, er
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.Target == "" {
+		return nil, fmt.Errorf("target is required")
+	}
+
+	scanner := sast.NewScanner()
+	var findings []*sast.Finding
+
+	info, err := os.Stat(params.Target)
+	if err != nil {
+		return nil, fmt.Errorf("target not found: %w", err)
+	}
+
+	if info.IsDir() {
+		findings, err = scanner.ScanDir(params.Target, []string{"node_modules", ".git", "vendor", "__pycache__"})
+		if err != nil {
+			return nil, fmt.Errorf("scan failed: %w", err)
+		}
+	} else {
+		content, err := os.ReadFile(params.Target)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read file: %w", err)
+		}
+		fileFindings := scanner.ScanFile(params.Target, string(content))
+		findings = fileFindings
+	}
+
+	var findingsMap []map[string]interface{}
+	for _, f := range findings {
+		findingsMap = append(findingsMap, f.ToMap())
+	}
+
 	return &Response{
 		Result: map[string]interface{}{
 			"target":   params.Target,
 			"ruleset":  params.Ruleset,
-			"findings": []interface{}{},
-			"total":    0,
-			"note":     "sast_run requires Semgrep installed and configured",
+			"findings": findingsMap,
+			"total":    len(findings),
+			"passed":   len(findings) == 0,
 		},
 	}, nil
 }
@@ -406,11 +458,24 @@ func (s *Server) handleInjectGuard(ctx context.Context, req *Request) (*Response
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	result := security.ScanContent(params.Content)
+
+	var findings []map[string]interface{}
+	for _, f := range result.Findings {
+		findings = append(findings, map[string]interface{}{
+			"type":     f.Type,
+			"severity": f.Severity,
+			"message":  f.Message,
+			"match":    f.Match,
+		})
+	}
+
 	return &Response{
 		Result: map[string]interface{}{
-			"clean":    true,
-			"patterns": []interface{}{},
-			"note":     "inject_guard checks for prompt injection patterns",
+			"clean":        result.Safe,
+			"has_findings": result.HasFindings,
+			"findings":     findings,
+			"scanned_at":   time.Now(),
 		},
 	}, nil
 }
@@ -424,13 +489,55 @@ func (s *Server) handleProactiveScan(ctx context.Context, req *Request) (*Respon
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.ModulePath == "" {
+		return nil, fmt.Errorf("module_path is required")
+	}
+
+	scanner := sast.NewScanner()
+	findings, err := scanner.ScanDir(params.ModulePath, []string{"node_modules", ".git", "vendor", "__pycache__"})
+	if err != nil {
+		return nil, fmt.Errorf("scan failed: %w", err)
+	}
+
+	var critical, high, medium, low int
+	var injectionFindings, secretFindings, pathFindings []map[string]interface{}
+
+	for _, f := range findings {
+		switch f.Severity {
+		case "critical":
+			critical++
+		case "high":
+			high++
+		case "medium":
+			medium++
+		case "low":
+			low++
+		}
+
+		fMap := f.ToMap()
+		switch f.Type {
+		case "xss", "ssti":
+			injectionFindings = append(injectionFindings, fMap)
+		case "secret":
+			secretFindings = append(secretFindings, fMap)
+		case "path-traversal":
+			pathFindings = append(pathFindings, fMap)
+		}
+	}
+
 	return &Response{
 		Result: map[string]interface{}{
-			"module_path": params.ModulePath,
-			"injections":  []interface{}{},
-			"secrets":     []interface{}{},
-			"clean":       true,
-			"note":        "proactive_scan requires file system access",
+			"module_path":     params.ModulePath,
+			"total_findings":  len(findings),
+			"critical_count":  critical,
+			"high_count":      high,
+			"medium_count":    medium,
+			"low_count":       low,
+			"injections":      injectionFindings,
+			"secrets":         secretFindings,
+			"path_traversals": pathFindings,
+			"clean":           len(findings) == 0,
+			"scanned_at":      time.Now(),
 		},
 	}, nil
 }
@@ -444,12 +551,16 @@ func (s *Server) handleSanitize(ctx context.Context, req *Request) (*Response, e
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	result := security.Sanitize(params.Content)
+
 	return &Response{
 		Result: map[string]interface{}{
-			"original_length": len(params.Content),
-			"sanitized":       params.Content,
-			"redacted":        []interface{}{},
-			"note":            "sanitize strips secrets and private tags",
+			"original_length":  len(params.Content),
+			"sanitized_length": len(result.Content),
+			"sanitized":        result.Content,
+			"redacted_count":   result.Redacted,
+			"redactions":       result.Redactions,
+			"sanitized_at":     time.Now(),
 		},
 	}, nil
 }

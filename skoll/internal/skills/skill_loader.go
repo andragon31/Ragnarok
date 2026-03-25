@@ -59,6 +59,10 @@ type SkillLoader struct {
 	skillsDir string
 }
 
+func (l *SkillLoader) GetSkillsDir() string {
+	return l.skillsDir
+}
+
 func NewSkillLoader(skillsDir string) *SkillLoader {
 	return &SkillLoader{skillsDir: skillsDir}
 }

@@ -372,6 +372,7 @@ Sin Skoll, el agente no sabe qué skills existen ni qué reglas seguir. Con Skol
 | `skill_verify` | Verifica que una skill es válida: tiene description, no tiene path traversal, y sus referencias existen. |
 | `skill_read_file` | Lee un archivo específico de una skill: un script en `scripts/`, una referencia en `references/`, o un asset en `assets/`. |
 | `bootstrap_import` | Importa skills desde .ragnarok/ generado por fenrir bootstrap. Inserta skills detectadas del stack en la DB de Skoll. |
+| `skills_import` | Importa skills desde GitHub (`--source github --url <url>`) o busca en GitHub (`--source skillsmp --query <texto>`). Descarga SKILL.md y lo instala localmente. |
 
 #### Rule Tools — Gestión de Reglas
 
@@ -439,7 +440,7 @@ Sin Tyr, código con vulnerabilidades, licencias problemáticas o poor quality l
 |------|-------------|
 | `pkg_check` | Verifica un package en registries públicos (npm, PyPI, crates.io, NuGet): existe?, es trusted?, tiene CVEs?, downloads mensuales, age, typosquatting risk. Consulta OSV.dev para vulnerabilidades. |
 | `pkg_license` | Obtiene la licencia de un package y verifica si es compatible con el proyecto. Detecta licencias copyleft o problemáticas. |
-| `pkg_audit` | Escanea dependencies de un proyecto por vulnerabilidades conocidas. Compara package-lock con databases de CVEs. |
+| `pkg_audit` | Escanea lockfiles del proyecto (package-lock.json, Cargo.lock, go.sum, requirements.txt, Pipfile.lock, poetry.lock, composer.lock). Lista todos los packages instalados. |
 | `pkg_audit_snapshot` | Captura el estado actual de vulnerabilidades para comparar en el futuro. Baseline para detectar nuevas vulnerabilidades. |
 | `pkg_audit_continuous` | Monitoreo continuo: alerta cuando una dependencia existente recibe un nuevo CVE. |
 
@@ -447,9 +448,23 @@ Sin Tyr, código con vulnerabilidades, licencias problemáticas o poor quality l
 
 | Tool | Descripción |
 |------|-------------|
-| `sast_run` | Ejecuta análisis estático en un target (archivo, directorio, modulo). Detecta patterns de código inseguro, hardcoded secrets, SQL injection, etc. |
+| `sast_run` | Ejecuta análisis estático en un target (archivo, directorio, modulo). Detecta **14 tipos de vulnerabilidades**: hardcoded secrets, SQL injection, command injection, XSS, path traversal, XXE, weak crypto, y más. No requiere Semgrep externo. |
 | `sast_findings` | Lista findings de SAST filtrables por severity (critical, high, medium, low) y status (open, resolved). |
 | `sast_resolve` | Marca un finding como resuelto con notas de por qué ya no aplica o cómo se mitigó. |
+
+**Reglas SAST integradas:**
+- `hardcoded-secret` — API keys, passwords, tokens hardcoded
+- `sql-injection` — Queries construidas con user input
+- `command-injection` — Comandos del sistema con input externo
+- `path-traversal` — Rutas de archivo sin validación
+- `xss` — Cross-site scripting (innerHTML, event handlers)
+- `unsafe-deserialization` — pickle, yaml.load sin SafeLoader
+- `xxe` — XML external entity
+- `weak-crypto` — MD5, SHA1, DES, RC4
+- `insecure-cookie` — Cookies sin secure/httpOnly
+- `csrf-missing` — POST/PUT/DELETE sin CSRF
+- `log-injection` — Logs sin sanitización
+- `https-missing` — SSL verification disabled
 
 #### Standard Tools — Quality Standards
 
@@ -470,9 +485,9 @@ Sin Tyr, código con vulnerabilidades, licencias problemáticas o poor quality l
 
 | Tool | Descripción |
 |------|-------------|
-| `inject_guard` | Detecta prompt injection en contenido externo: archivos leídos, APIs, user input. Previene ataques via malicious content. |
-| `sanitize` | Limpia contenido potencialmente peligroso: redacta secrets, remueve tags privados, sanitiza output. |
-| `proactive_scan` | Escaneo proactivo de un módulo: busca secrets hardcoded, patterns inseguros, dependencias vulnerables. |
+| `inject_guard` | Detecta prompt injection: `<script>`, `javascript:`, `onerror=`, `{{}}`, `${}`, `<iframe>`. Protege contra ataques via malicious content. |
+| `sanitize` | Limpia y redacta contenido: secrets (API keys, passwords), emails, IPs, credit cards, phone numbers. Usa `[REDACTED]` para proteger datos sensibles. |
+| `proactive_scan` | Escaneo proactivo de un módulo completo: detecta secrets hardcoded, patterns inseguros, vulnerabilidades. Reporta counts por severity. |
 
 #### Import Tools — Integración
 

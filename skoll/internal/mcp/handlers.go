@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ragnarok-ecosystem/skoll/internal/skills"
+	"github.com/ragnarok-ecosystem/skoll/internal/skillsmp"
 )
 
 func (s *Server) handleSkillList(ctx context.Context, req *Request) (*Response, error) {
@@ -812,14 +813,104 @@ func (s *Server) handleSkillsImport(ctx context.Context, req *Request) (*Respons
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	client := skillsmp.NewClient()
+
+	if params.Source == "github" && params.URL != "" {
+		skillName := skillsmp.ExtractSkillNameFromURL(params.URL)
+		if skillName == "" {
+			return nil, fmt.Errorf("invalid GitHub URL: %s", params.URL)
+		}
+
+		skillsDir := s.skillLoader.GetSkillsDir()
+		skillDir := filepath.Join(skillsDir, skillName)
+
+		if err := os.MkdirAll(skillDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create skill directory: %w", err)
+		}
+
+		if err := client.CloneOrDownloadSkill(params.URL, skillsDir); err != nil {
+			return &Response{
+				Result: map[string]interface{}{
+					"source":     params.Source,
+					"url":        params.URL,
+					"skill_name": skillName,
+					"imported":   false,
+					"error":      err.Error(),
+				},
+			}, nil
+		}
+
+		skill, err := s.skillLoader.LoadSkillIndex(skillName)
+		if err != nil {
+			skill = &skills.SkillInfo{Name: skillName}
+		}
+
+		return &Response{
+			Result: map[string]interface{}{
+				"source":      params.Source,
+				"url":         params.URL,
+				"skill_name":  skillName,
+				"skill":       skill.ToMap(),
+				"imported":    true,
+				"scan_passed": !params.SkipScan,
+			},
+		}, nil
+	}
+
+	if params.Source == "skillsmp" || (params.Source == "" && params.Query != "") {
+		if params.Query == "" {
+			return nil, fmt.Errorf("query is required for skillsmp source")
+		}
+
+		result, err := client.SearchSkills(params.Query, 10)
+		if err != nil {
+			return &Response{
+				Result: map[string]interface{}{
+					"source": params.Source,
+					"query":  params.Query,
+					"error":  err.Error(),
+				},
+			}, nil
+		}
+
+		var skillsList []map[string]interface{}
+		for _, skill := range result.Skills {
+			skillsList = append(skillsList, map[string]interface{}{
+				"name":        skill.Name,
+				"description": skill.Description,
+				"author":      skill.Author,
+				"stars":       skill.Stars,
+				"license":     skill.License,
+				"topics":      skill.Topics,
+			})
+		}
+
+		return &Response{
+			Result: map[string]interface{}{
+				"source": params.Source,
+				"query":  params.Query,
+				"skills": skillsList,
+				"total":  result.Total,
+				"note":   "Use URL parameter with github source to import a specific skill",
+			},
+		}, nil
+	}
+
+	if params.Source == "local" {
+		return &Response{
+			Result: map[string]interface{}{
+				"source": params.Source,
+				"note":   "Local import reads from .skoll/skills/ directory",
+			},
+		}, nil
+	}
+
 	return &Response{
 		Result: map[string]interface{}{
-			"source":      params.Source,
-			"query":       params.Query,
-			"url":         params.URL,
-			"imported":    false,
-			"scan_passed": !params.SkipScan,
-			"note":        "SkillsMP import requires network access. Use local files for offline import.",
+			"source": params.Source,
+			"query":  params.Query,
+			"url":    params.URL,
+			"error":  "unsupported source or missing parameters",
 		},
 	}, nil
 }
