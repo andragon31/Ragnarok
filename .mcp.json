@@ -1,0 +1,48 @@
+{
+  "mcpServers": {
+    "fenrir": {
+      "command": "C:\\Users\\Andragon\\Documents\\Github\\Ragnarok\\bin\\fenrir.exe",
+      "args": [
+        "serve",
+        "--port",
+        "7437"
+      ],
+      "env": {
+        "MCP_TRANSPORT": "tcp"
+      }
+    },
+    "hati": {
+      "command": "C:\\Users\\Andragon\\Documents\\Github\\Ragnarok\\bin\\hati.exe",
+      "args": [
+        "serve",
+        "--port",
+        "7439"
+      ],
+      "env": {
+        "MCP_TRANSPORT": "tcp"
+      }
+    },
+    "skoll": {
+      "command": "C:\\Users\\Andragon\\Documents\\Github\\Ragnarok\\bin\\skoll.exe",
+      "args": [
+        "serve",
+        "--port",
+        "7438"
+      ],
+      "env": {
+        "MCP_TRANSPORT": "tcp"
+      }
+    },
+    "tyr": {
+      "command": "C:\\Users\\Andragon\\Documents\\Github\\Ragnarok\\bin\\tyr.exe",
+      "args": [
+        "serve",
+        "--port",
+        "7440"
+      ],
+      "env": {
+        "MCP_TRANSPORT": "tcp"
+      }
+    }
+  }
+}

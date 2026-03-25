@@ -531,6 +531,13 @@ func runInit(projectName, baseDir string) {
 		"tyr":    filepath.Join(baseDir, ".tyr"),
 	}
 
+	pluginPorts := map[string]int{
+		"fenrir": 7437,
+		"hati":   7439,
+		"skoll":  7438,
+		"tyr":    7440,
+	}
+
 	for name, dir := range pluginDirs {
 		fmt.Printf("\n📦 Initializing %s...\n", strings.ToUpper(name))
 		fmt.Printf("   Directory: %s\n", dir)
@@ -540,7 +547,7 @@ func runInit(projectName, baseDir string) {
 		cfg := map[string]interface{}{
 			"project":  projectName,
 			"version":  version,
-			"port":     getPluginPort(name),
+			"port":     pluginPorts[name],
 			"data_dir": dir,
 		}
 
@@ -550,11 +557,65 @@ func runInit(projectName, baseDir string) {
 		fmt.Printf("   ✓ Config: %s\n", cfgPath)
 	}
 
+	generateMCPJson(projectName, baseDir)
+
 	fmt.Printf("\n✓ All plugins initialized for project: %s\n", projectName)
 	fmt.Println("\nNext steps:")
 	fmt.Println("  1. Start servers: rag serve")
 	fmt.Println("  2. Scan project:  rag scan --path ./your-project")
 	fmt.Println("  3. Check health:  rag stats --ecosystem")
+}
+
+type MCPJson struct {
+	MCPServers map[string]MCPServer `json:"mcpServers"`
+}
+
+type MCPServer struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
+func generateMCPJson(projectName, baseDir string) {
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+
+	selfPath, _ := os.Executable()
+	selfDir := filepath.Dir(selfPath)
+
+	pluginPorts := map[string]int{
+		"fenrir": 7437,
+		"hati":   7439,
+		"skoll":  7438,
+		"tyr":    7440,
+	}
+
+	mcpServers := make(map[string]MCPServer)
+
+	for name, port := range pluginPorts {
+		binName := name + ext
+		binPath := filepath.Join(selfDir, binName)
+
+		if _, err := os.Stat(binPath); os.IsNotExist(err) {
+			binPath = binName
+		}
+
+		mcpServers[name] = MCPServer{
+			Command: binPath,
+			Args:    []string{"serve", "--port", fmt.Sprintf("%d", port)},
+			Env:     map[string]string{"MCP_TRANSPORT": "tcp"},
+		}
+	}
+
+	mcpJson := MCPJson{MCPServers: mcpServers}
+
+	cwd, _ := os.Getwd()
+	mcpJsonPath := filepath.Join(cwd, ".mcp.json")
+	data, _ := json.MarshalIndent(mcpJson, "", "  ")
+	os.WriteFile(mcpJsonPath, data, 0644)
+	fmt.Printf("   ✓ MCP config: %s\n", mcpJsonPath)
 }
 
 func runScan(projectPath string, doBootstrap bool) {

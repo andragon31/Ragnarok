@@ -6,7 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/ragnarok-ecosystem/hati/internal/config"
@@ -117,9 +121,8 @@ func (s *Server) errorResponse(id string, code int, msg string) ([]byte, error) 
 	return json.Marshal(resp)
 }
 
-func (s *Server) Run(ctx context.Context) error {
-	addr := fmt.Sprintf(":%d", s.port)
-	log.Printf("Hati MCP server running on %s", addr)
+func (s *Server) RunStdio(ctx context.Context) error {
+	log.Printf("Hati MCP server running on stdio")
 
 	stdin := os.NewFile(uintptr(os.Stdin.Fd()), "stdin")
 	stdout := os.NewFile(uintptr(os.Stdout.Fd()), "stdout")
@@ -148,6 +151,105 @@ func (s *Server) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (s *Server) RunTCPServer(ctx context.Context) error {
+	addr := fmt.Sprintf(":%d", s.port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
+	}
+	defer listener.Close()
+
+	log.Printf("Hati MCP server listening on %s (TCP)", addr)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mcp", s.handleHTTPRequest)
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/", s.handleRoot)
+
+	server := &http.Server{
+		Handler: mux,
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		server.Close()
+	}()
+
+	err = server.Serve(listener)
+	if err != nil && !strings.Contains(err.Error(), "Server closed") {
+		return err
+	}
+	wg.Wait()
+	return nil
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "healthy",
+		"server": "hati",
+		"port":   s.port,
+	})
+}
+
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"name":    "Hati",
+		"version": "1.1.0",
+		"status":  "running",
+		"mcp":     "/mcp",
+	})
+}
+
+func (s *Server) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errResp, _ := s.errorResponse("", -32700, "Parse error: "+err.Error())
+		w.Write(errResp)
+		return
+	}
+
+	ctx := context.Background()
+	resp, err := s.HandleRequest(ctx, req.Params)
+	if err != nil {
+		errResp, _ := s.errorResponse(req.ID, -32603, "Internal error: "+err.Error())
+		w.Write(errResp)
+		return
+	}
+
+	w.Write(resp)
+}
+
+func (s *Server) Run(ctx context.Context) error {
+	addr := fmt.Sprintf(":%d", s.port)
+	log.Printf("Hati MCP server running on %s", addr)
+
+	if os.Getenv("MCP_TRANSPORT") == "tcp" {
+		return s.RunTCPServer(ctx)
+	}
+
+	return s.RunStdio(ctx)
 }
 
 type Plan struct {

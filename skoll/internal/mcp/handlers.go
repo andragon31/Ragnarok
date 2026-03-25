@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -783,22 +784,93 @@ func (s *Server) handleTeamRegister(ctx context.Context, req *Request) (*Respons
 
 func (s *Server) handleDodCheck(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
-		WorkflowID string   `json:"workflow_id"`
-		Standards  []string `json:"standards,omitempty"`
+		WorkflowID string `json:"workflow_id"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
-	return &Response{
-		Result: map[string]interface{}{
-			"workflow_id": params.WorkflowID,
-			"standards":   params.Standards,
-			"passed":      true,
-			"note":        "DoD check requires Tyr integration for full verification",
-		},
-	}, nil
+	if params.WorkflowID == "" {
+		return nil, fmt.Errorf("workflow_id is required")
+	}
+
+	result := &DodCheckResult{
+		WorkflowID: params.WorkflowID,
+		Checks:     []DodCheckItem{},
+		Passed:     true,
+		CheckedAt:  time.Now(),
+	}
+
+	query := `SELECT w.id, w.name, w.status, w.completed_at,
+		(SELECT COUNT(*) FROM workflow_steps WHERE workflow_id = w.id) as total_steps,
+		(SELECT COUNT(*) FROM workflow_steps WHERE workflow_id = w.id AND status = 'completed') as completed_steps
+		FROM workflows w WHERE w.id = ?`
+
+	var workflow struct {
+		ID             string
+		Name           string
+		Status         string
+		CompletedAt    *time.Time
+		TotalSteps     int
+		CompletedSteps int
+	}
+
+	err := s.db.QueryRow(query, params.WorkflowID).Scan(
+		&workflow.ID, &workflow.Name, &workflow.Status,
+		&workflow.CompletedAt, &workflow.TotalSteps, &workflow.CompletedSteps,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("workflow not found: %s", params.WorkflowID)
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to query workflow: %w", err)
+	}
+
+	result.Checks = append(result.Checks, DodCheckItem{
+		Check:   "workflow_completed",
+		Passed:  workflow.CompletedAt != nil,
+		Message: fmt.Sprintf("Workflow %s: %d/%d steps completed", workflow.Name, workflow.CompletedSteps, workflow.TotalSteps),
+	})
+
+	if workflow.CompletedAt == nil {
+		result.Passed = false
+	}
+
+	result.Checks = append(result.Checks, DodCheckItem{
+		Check:   "all_steps_completed",
+		Passed:  workflow.CompletedSteps == workflow.TotalSteps && workflow.TotalSteps > 0,
+		Message: fmt.Sprintf("All %d steps completed", workflow.TotalSteps),
+	})
+
+	if workflow.CompletedSteps != workflow.TotalSteps {
+		result.Passed = false
+	}
+
+	var evidenceCount int
+	s.db.QueryRow(`SELECT COUNT(*) FROM approval_records WHERE plan_id IN 
+		(SELECT DISTINCT plan_id FROM workflow_steps WHERE workflow_id = ?)`, params.WorkflowID).Scan(&evidenceCount)
+
+	result.Checks = append(result.Checks, DodCheckItem{
+		Check:   "approval_evidence",
+		Passed:  evidenceCount > 0,
+		Message: fmt.Sprintf("%d approval records found", evidenceCount),
+	})
+
+	return &Response{Result: result}, nil
+}
+
+type DodCheckResult struct {
+	WorkflowID string         `json:"workflow_id"`
+	Checks     []DodCheckItem `json:"checks"`
+	Passed     bool           `json:"passed"`
+	CheckedAt  time.Time      `json:"checked_at"`
+}
+
+type DodCheckItem struct {
+	Check   string `json:"check"`
+	Passed  bool   `json:"passed"`
+	Message string `json:"message"`
 }
 
 func (s *Server) handleSkillsImport(ctx context.Context, req *Request) (*Response, error) {

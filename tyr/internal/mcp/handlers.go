@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -231,20 +232,144 @@ func (s *Server) handlePkgAuditSnapshot(ctx context.Context, req *Request) (*Res
 
 func (s *Server) handlePkgAuditContinuous(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
-		ProjectPath string `json:"project_path,omitempty"`
+		ProjectPath  string   `json:"project_path,omitempty"`
+		Ecosystems   []string `json:"ecosystems,omitempty"`
+		PackageNames []string `json:"package_names,omitempty"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	result := &ContinuousAuditResult{
+		ProjectPath: params.ProjectPath,
+		NewCVEs:     []CVEFinding{},
+		CheckedAt:   time.Now(),
+	}
+
+	if params.ProjectPath != "" {
+		auditResult, err := audit.AuditProject(params.ProjectPath)
+		if err == nil && auditResult != nil {
+			for _, pkg := range auditResult.Packages {
+				eco := pkg.Ecosystem
+				if eco == "" {
+					eco = mapEcosystem(auditResult.Source)
+				}
+				cves, _ := CheckGitHubAdvisories(pkg.Name, eco)
+				result.NewCVEs = append(result.NewCVEs, cves...)
+			}
+		}
+	} else if len(params.PackageNames) > 0 {
+		for i, pkgName := range params.PackageNames {
+			eco := "npm"
+			if len(params.Ecosystems) > i {
+				eco = params.Ecosystems[i]
+			}
+			cves, _ := CheckGitHubAdvisories(pkgName, eco)
+			result.NewCVEs = append(result.NewCVEs, cves...)
+		}
+	}
+
 	return &Response{
-		Result: map[string]interface{}{
-			"project_path": params.ProjectPath,
-			"new_cves":     []interface{}{},
-			"note":         "pkg_audit_continuous monitors for new CVEs",
-		},
+		Result: result,
 	}, nil
+}
+
+type ContinuousAuditResult struct {
+	ProjectPath string       `json:"project_path"`
+	NewCVEs     []CVEFinding `json:"new_cves"`
+	CheckedAt   time.Time    `json:"checked_at"`
+}
+
+type CVEFinding struct {
+	Package        string `json:"package"`
+	Ecosystem      string `json:"ecosystem"`
+	GhsaID         string `json:"ghsa_id"`
+	CVEID          string `json:"cve_id,omitempty"`
+	Severity       string `json:"severity"`
+	Description    string `json:"description"`
+	PublishedAt    string `json:"published_at"`
+	UpdatedAt      string `json:"updated_at"`
+	FixedInVersion string `json:"fixed_in,omitempty"`
+}
+
+func mapEcosystem(source string) string {
+	switch source {
+	case "npm", "pnpm", "yarn":
+		return "npm"
+	case "cargo":
+		return "cargo"
+	case "go", "go-mod":
+		return "go"
+	case "pip", "pipenv", "poetry":
+		return "pip"
+	case "composer":
+		return "packagist"
+	default:
+		return "npm"
+	}
+}
+
+func CheckGitHubAdvisories(packageName, ecosystem string) ([]CVEFinding, error) {
+	url := fmt.Sprintf("https://api.github.com/advisories?package=%s&ecosystem=%s", packageName, ecosystem)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return []CVEFinding{}, nil
+	}
+
+	var advisories []struct {
+		GhsaID      string `json:"ghsa_id"`
+		CVEID       string `json:"cve_id"`
+		Severity    string `json:"severity"`
+		Description string `json:"description"`
+		PublishedAt string `json:"published_at"`
+		UpdatedAt   string `json:"updated_at"`
+		FixedIn     string `json:"fixed_in,omitempty"`
+		Identifiers []struct {
+			Value string `json:"value"`
+			Type  string `json:"type"`
+		} `json:"identifiers"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&advisories); err != nil {
+		return nil, err
+	}
+
+	var findings []CVEFinding
+	for _, adv := range advisories {
+		cveID := ""
+		for _, id := range adv.Identifiers {
+			if id.Type == "CVE" {
+				cveID = id.Value
+				break
+			}
+		}
+
+		findings = append(findings, CVEFinding{
+			Package:        packageName,
+			Ecosystem:      ecosystem,
+			GhsaID:         adv.GhsaID,
+			CVEID:          cveID,
+			Severity:       adv.Severity,
+			Description:    adv.Description,
+			PublishedAt:    adv.PublishedAt,
+			UpdatedAt:      adv.UpdatedAt,
+			FixedInVersion: adv.FixedIn,
+		})
+	}
+
+	return findings, nil
 }
 
 func (s *Server) handleSastRun(ctx context.Context, req *Request) (*Response, error) {
