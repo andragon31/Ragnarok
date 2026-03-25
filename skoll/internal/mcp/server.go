@@ -7,16 +7,19 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ragnarok-ecosystem/skoll/internal/config"
+	"github.com/ragnarok-ecosystem/skoll/internal/skills"
 )
 
 type Server struct {
-	port     int
-	config   *config.Config
-	db       *sql.DB
-	handlers map[string]ToolHandler
+	port        int
+	config      *config.Config
+	db          *sql.DB
+	handlers    map[string]ToolHandler
+	skillLoader *skills.SkillLoader
 }
 
 type ToolHandler func(ctx context.Context, req *Request) (*Response, error)
@@ -54,15 +57,19 @@ type Rule struct {
 	Name      string    `json:"name"`
 	Category  string    `json:"category"`
 	Content   string    `json:"content,omitempty"`
+	Severity  string    `json:"severity"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 type Agent struct {
-	ID     string   `json:"id"`
-	Name   string   `json:"name"`
-	Skills []string `json:"skills,omitempty"`
-	Scope  string   `json:"scope,omitempty"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Role         string   `json:"role,omitempty"`
+	Skills       []string `json:"skills,omitempty"`
+	Scope        string   `json:"scope,omitempty"`
+	AllowedTools []string `json:"allowed_tools,omitempty"`
+	IsActive     int      `json:"is_active"`
 }
 
 type Workflow struct {
@@ -73,11 +80,13 @@ type Workflow struct {
 }
 
 func NewServer(cfg *config.Config, db *sql.DB) *Server {
+	skillsDir := filepath.Join(cfg.DataDir, "skills")
 	s := &Server{
-		port:     cfg.Port,
-		config:   cfg,
-		db:       db,
-		handlers: make(map[string]ToolHandler),
+		port:        cfg.Port,
+		config:      cfg,
+		db:          db,
+		handlers:    make(map[string]ToolHandler),
+		skillLoader: skills.NewSkillLoader(skillsDir),
 	}
 	s.registerHandlers()
 	return s

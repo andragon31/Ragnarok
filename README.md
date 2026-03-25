@@ -208,249 +208,290 @@ flowchart TD
 
 ### 3.1 Fenrir (Memory & Knowledge)
 
-```mermaid
-flowchart TB
-    subgraph Fenrir["🧠 FENRIR - Memory & Knowledge"]
-        subgraph Memory["📚 MEMORY"]
-            KG["🕸️ Knowledge Graph<br/>nodes, edges, FTS5"]
-            Sessions["📝 Sessions<br/>context, checkpoint_id"]
-            Obs["📊 Observations<br/>decisions, prompts, code"]
-        end
+**¿Qué hace?**
+Fenrir es la memoria institucional del proyecto. Captura y recupera todo el contexto: decisiones tomadas, specs creadas, incidentes resueltos, y conocimiento del dominio. Es quien responde "¿qué sabemos sobre este proyecto?".
 
-        subgraph Specs["📋 SPECS MODULE"]
-            SpecSave["spec_save"]
-            SpecList["spec_list"]
-            SpecCheck["spec_check"]
-            SpecDelta["spec_delta"]
-        end
+**¿Por qué es importante?**
+Sin Fenrir, cada sesión del agente empieza en blanco. Con Fenrir, el agente tiene acceso a años de decisiones, specs y conocimiento acumulado. Evita que el agente repita errores o contradiga decisiones previas.
 
-        subgraph Intent["🎯 INTENT TRACKING"]
-            IntentSave["intent_save"]
-            IntentVerify["intent_verify"]
-            IntentGet["intent_get"]
-        end
+---
 
-        subgraph Analysis["🔍 ANALYSIS"]
-            PromptAnalyze["prompt_analyze"]
-            BiasReport["bias_report"]
-            Authority["authority_get/set"]
-        end
+#### Memory Tools — Gestión de Sesiones y Observaciones
 
-        subgraph Scanner["🔍 PROJECT SCANNER"]
-            ProjectScan["project_scan"]
-            ProjectBootstrap["project_bootstrap"]
-            AgentsMdGet["agents_md_get"]
-        end
+| Tool | Descripción |
+|------|-------------|
+| `mem_session_start` | Inicia una sesión de trabajo. Registra el proyecto, módulo y objetivo. Permite rastrear todo lo que ocurre durante la sesión. |
+| `mem_session_end` | Cierra la sesión actual y calcula métricas: duración, tokens usados, decisiones tomadas. Genera un resumen para futuras referencias. |
+| `mem_save` | Guarda una observación en la memoria. Una observación puede ser una decisión ("usamos PostgreSQL para auth"), un aprendizaje ("error X sucede cuando Y"), o un contexto ("el módulo Z fue refactoreado en 2024"). |
+| `mem_find` | Busca en la memoria usando FTS5 (búsqueda full-text). Encuentra observaciones relevantes al contexto actual. Ejemplo: "mem_find('authentication oauth')" retorna todas las observaciones sobre auth. |
+| `mem_get_observation` | Recupera una observación específica por su ID. Útil para ver detalles completos de una decisión o aprendizaje previo. |
 
-        subgraph Incidents["🚨 INCIDENTS"]
-            IncidentSave["incident_save"]
-            IncidentResolve["incident_resolve"]
-            ConflictDetect["conflict_detect"]
-        end
-    end
+#### Specs Tools — Especificaciones y Requisitos
 
-    Memory --> Specs
-    Specs --> Intent
-    Intent --> Analysis
-    Scanner --> Analysis
-```
+| Tool | Descripción |
+|------|-------------|
+| `spec_save` | Crea o actualiza una especificación. Una spec define qué debe hacer una feature usando formato Given/When/Then. Ejemplo: "Given el usuario no está autenticado, When accede a /dashboard, Then debe ver login". |
+| `spec_list` | Lista todas las specs del proyecto, filtrables por módulo, status o tipo. Muestra qué features están especadas y cuáles faltan. |
+| `spec_check` | Verifica si el código implementado cumple una spec. Compara las condiciones Given/When/Then con el código real. |
+| `spec_delta` | Registra cambios en specs. Cuando una spec evoluciona, delta registra qué cambió y por qué. Mantiene historial de evolución. |
+| `spec_related` | Encuentra specs relacionadas con una feature o módulo. Útil para entender el contexto completo antes de implementar. |
 
-#### Fenrir MCP Tools (25)
+#### Intent Tools — Tracking de Intenciones
 
-| Category | Tools |
-|----------|-------|
-| **Memory** | `mem_session_start`, `mem_session_end`, `mem_save`, `mem_find`, `mem_get_observation` |
-| **Specs** | `spec_save`, `spec_list`, `spec_check`, `spec_delta`, `spec_related` |
-| **Intent** | `intent_save`, `intent_verify`, `intent_get` |
-| **Bias** | `bias_report` |
-| **Authority** | `authority_get`, `authority_set` |
-| **Incidents** | `incident_save`, `incident_list`, `incident_resolve`, `conflict_detect` |
-| **Scanner** | `prompt_analyze`, `project_scan`, `project_bootstrap`, `agents_md_get` |
-| **Knowledge** | `knowledge_query`, `knowledge_add` |
+| Tool | Descripción |
+|------|-------------|
+| `intent_save` | Guarda la intención del agente: qué planea hacer y por qué. Crea un registro antes de actuar. |
+| `intent_verify` | Verifica que el código implementado matches la intención guardada. Calcula un coverage score. |
+| `intent_get` | Recupera la intención actual o pasada para un plan. Permite comparar qué se planeó vs qué se hizo. |
+
+#### Bias Tools — Detección de Sesgos
+
+| Tool | Descripción |
+|------|-------------|
+| `bias_report` | Registra cuando el agente detecta bias en su propio razonamiento. Reporta el tipo de bias y la corrección aplicada. |
+
+#### Authority Tools — Autoridad y Validación
+
+| Tool | Descripción |
+|------|-------------|
+| `authority_get` | Obtiene la autoridad actual para un módulo o decisión. Define quién puede aprobar qué. |
+| `authority_set` | Establece la autoridad para un contexto. Ejemplo: "authority_set(module: 'payments', role: 'tech-lead')". |
+
+#### Incident Tools — Gestión de Incidentes
+
+| Tool | Descripción |
+|------|-------------|
+| `incident_save` | Registra un incidente: bug, error, o problema detectado. Incluye severity, módulo afectado y solución propuesta. |
+| `incident_list` | Lista incidentes abiertos o resueltos. Filtra por módulo, severity o fecha. |
+| `incident_resolve` | Marca un incidente como resuelto y registra la solución aplicada. |
+| `conflict_detect` | Detecta conflictos con decisiones o specs previas. Advierte cuando el código actual contradice el historial. |
+
+#### Scanner Tools — Análisis de Proyecto
+
+| Tool | Descripción |
+|------|-------------|
+| `prompt_analyze` | Analiza si un prompt del usuario es relevante para el proyecto. Retorna is_relevant y confidence. Descarta prompts fuera de scope. |
+| `project_scan` | Escanea el proyecto y detecta: lenguaje, framework, package manager, arquitectura, módulos y patrones (CI/CD, Docker, tests). |
+| `project_bootstrap` | Genera archivos de configuración para el agente: skills.json, rules.json, standards.json basados en el stack detectado. |
+| `agents_md_get` | Lee el AGENTS.md del proyecto y retorna su contenido. Proporciona instrucciones específicas del proyecto al agente. |
+
+#### Knowledge Tools — Grafo de Conocimiento
+
+| Tool | Descripción |
+|------|-------------|
+| `knowledge_query` | Query sobre el grafo de conocimiento. Encuentra relaciones entre conceptos, módulos o decisiones. |
+| `knowledge_add` | Añade nodos y edges al grafo. Construye ontología del proyecto con el tiempo. |
+
+---
 
 ### 3.2 Hati (Planning & Approvals)
 
-```mermaid
-flowchart TB
-    subgraph Hati["📋 HATI - Planning & Approvals"]
-        subgraph Plans["📝 PLANS"]
-            PlanCreate["plan_create"]
-            PlanGet["plan_get"]
-            PlanUpdate["plan_update"]
-            PlanList["plan_list"]
-        end
+**¿Qué hace?**
+Hati es el sistema de planeación y aprobación. Crea planes de acción, define fases, y establece checkpoints de approval antes de proceder. Es quien responde "¿cuál es el plan y quién lo aprueba?".
 
-        subgraph Phases["🔄 PHASES"]
-            PhaseAdd["phase_add"]
-            PhaseList["phase_list"]
-            PhaseComplete["phase_complete"]
-        end
+**¿Por qué es importante?**
+Sin Hati, el agente actúa sin estructura ni supervisión. Con Hati, cada feature sigue un flujo controlado: plan → fases → approval → implementación → verificación. Reduce riesgo y mejora calidad.
 
-        subgraph Checkpoints["⏳ CHECKPOINTS"]
-            CpOpen["checkpoint_open"]
-            CpDecide["checkpoint_decide"]
-            CpStatus["checkpoint_status"]
-        end
+---
 
-        subgraph Decisions["✅ DECISIONS"]
-            DecisionRecord["decision_record"]
-            DecisionGet["decision_get"]
-            DecisionList["decision_list"]
-            DecisionCancel["decision_cancel"]
-        end
+#### Plan Tools — Gestión de Planes
 
-        subgraph Quality["📊 QUALITY"]
-            QualitySnapshot["quality_snapshot"]
-            SpecImpact["spec_impact"]
-            SpecStatus["spec_status"]
-        end
+| Tool | Descripción |
+|------|-------------|
+| `plan_create` | Crea un nuevo plan para una feature o tarea. Define título, descripción, risk_level y módulos afectados. Un plan agrupa fases y checkpoints. |
+| `plan_get` | Obtiene los detalles de un plan específico: fases, status, métricas de calidad. |
+| `plan_update` | Actualiza un plan: cambia status, añade notas, actualiza risk_level. |
+| `plan_list` | Lista todos los planes del proyecto, filtrables por status (draft, active, completed). |
 
-        subgraph Feedback["💬 FEEDBACK"]
-            FeedbackSave["feedback_save"]
-            FeedbackList["feedback_list"]
-        end
-    end
+#### Phase Tools — Fases del Plan
 
-    Plans --> Phases
-    Phases --> Checkpoints
-    Checkpoints --> Decisions
-    Decisions --> Quality
-    Quality --> Feedback
-```
+| Tool | Descripción |
+|------|-------------|
+| `phase_add` | Añade una fase a un plan. Cada fase tiene nombre, descripción, orden y risk_level. Ejemplo: "phase 1: research", "phase 2: implementation", "phase 3: testing". |
+| `phase_list` | Lista las fases de un plan en orden. Muestra cuál está activa, completada o pendiente. |
+| `phase_complete` | Marca una fase como completada y avanza a la siguiente. Registra qué se hizo en esa fase. |
 
-#### Hati MCP Tools (22)
+#### Checkpoint Tools — Puntos de Approval
 
-| Category | Tools |
-|----------|-------|
-| **Plans** | `plan_create`, `plan_get`, `plan_update`, `plan_list` |
-| **Phases** | `phase_add`, `phase_list`, `phase_complete` |
-| **Checkpoints** | `checkpoint_open`, `checkpoint_decide`, `checkpoint_status` |
-| **Decisions** | `decision_record`, `decision_get`, `decision_list`, `decision_cancel` |
-| **Quality** | `quality_snapshot`, `spec_impact`, `spec_status` |
-| **Feedback** | `feedback_save`, `feedback_list` |
-| **Status** | `hati_status`, `hati_stats` |
+| Tool | Descripción |
+|------|-------------|
+| `checkpoint_open` | Abre un checkpoint de approval. Un checkpoint pausa la ejecución hasta que alguien (humano o agente) approve o reject. Tipos: "pre" (antes de empezar), "mid" (entre fases), "post" (al finalizar). |
+| `checkpoint_decide` | Registra la decisión de un checkpoint: approved o rejected. Si approved, el flujo continúa. Si rejected, se registra la razón y el plan debe replanificarse. |
+| `checkpoint_status` | Consulta el estado de un checkpoint: pending, approved, rejected. Muestra quién tomó la decisión y cuándo. |
+
+#### Decision Tools — Registro de Decisiones
+
+| Tool | Descripción |
+|------|-------------|
+| `decision_record` | Registra una decisión tomada durante la implementación: tecnología elegida, trade-off aceptado, fallback planeado. |
+| `decision_get` | Recupera una decisión específica con su contexto yrazón. |
+| `decision_list` | Lista todas las decisiones de un plan o proyecto. Útil para code reviews y onboarding. |
+| `decision_cancel` | Cancela una decisión si fue revocada o reemplazada. Mantiene historial pero la marca como inactiva. |
+
+#### Quality Tools — Métricas de Calidad
+
+| Tool | Descripción |
+|------|-------------|
+| `quality_snapshot` | Captura el estado de calidad actual: coverage, lint errors, debt acumulado. Genera snapshot para comparar evolución. |
+| `spec_impact` | Calcula el impacto de un plan en las specs: cuántas specs se ven afectadas, modificadas o creadas. |
+| `spec_status` | Consulta el estado de specs relacionadas: cuáles están cumplidas, cuáles faltan, cuáles tienen debt. |
+
+#### Feedback Tools — Retroalimentación
+
+| Tool | Descripción |
+|------|-------------|
+| `feedback_save` | Guarda feedback de una fase o checkpoint. Puede ser de un reviewer humano o de un agente validando. |
+| `feedback_list` | Lista el feedback de un plan o fase. Muestra tendencias y áreas de mejora. |
+
+#### Status Tools — Estado del Sistema
+
+| Tool | Descripción |
+|------|-------------|
+| `hati_status` | Estado general de Hati: planes activos, fases completadas, checkpoints pendientes. |
+| `hati_stats` | Estadísticas: tiempo promedio de approval, planes por risk_level, decisiones por día. |
+
+---
 
 ### 3.3 Skoll (Skills & Rules)
 
-```mermaid
-flowchart TB
-    subgraph Skoll["⚙️ SKOLL - Skills & Rules"]
-        subgraph Skills["🎯 SKILLS"]
-            SkillList["skill_list"]
-            SkillLoad["skill_load"]
-            SkillSearch["skill_search"]
-            SkillVerify["skill_verify"]
-            SkillRead["skill_read_file"]
-            BootstrapImport["bootstrap_import"]
-        end
+**¿Qué hace?**
+Skoll es el orquestador RSAW (Rules, Skills, Agents, Workflows). Define quién hace qué (Agents), cómo lo hace (Skills), qué reglas debe seguir (Rules), y en qué orden (Workflows). Es quien responde "¿quién hace qué y cómo?".
 
-        subgraph Rules["📏 RULES"]
-            RuleList["rule_list"]
-            RuleCheck["rule_check"]
-            RuleGet["rule_get"]
-        end
+**¿Por qué es importante?**
+Sin Skoll, el agente no sabe qué skills existen ni qué reglas seguir. Con Skoll, el equipo define estándares, el agente sabe qué skills usar, y cada trabajo sigue el workflow correcto.
 
-        subgraph Agents["🤖 AGENTS"]
-            AgentList["agent_list"]
-            AgentActivate["agent_activate"]
-            AgentContext["agent_context"]
-            AgentHandoff["agent_handoff"]
-        end
+---
 
-        subgraph Workflows["🔀 WORKFLOWS"]
-            WorkflowStart["workflow_start"]
-            WorkflowProgress["workflow_progress"]
-            WorkflowComplete["workflow_complete"]
-        end
+#### Skill Tools — Gestión de Habilidades
 
-        subgraph RSAW["⚡ RSAW"]
-            DodCheck["dod_check"]
-            TeamRegister["team_register"]
-            ApiDocsCheck["api_docs_check"]
-        end
-    end
+| Tool | Descripción |
+|------|-------------|
+| `skill_list` | Lista todas las skills disponibles en formato "progressive disclosure": solo metadata liviana (nombre, descripción, triggers). No carga contenido completo para ahorrar tokens. |
+| `skill_load` | Carga una skill completa: contenido del SKILL.md, archivos disponibles en scripts/references/assets, y allowed-tools pre-aprobados. |
+| `skill_search` | Busca skills por nombre, descripción o framework. Retorna matches relevantes ordenados por similitud. |
+| `skill_verify` | Verifica que una skill es válida: tiene description, no tiene path traversal, y sus referencias existen. |
+| `skill_read_file` | Lee un archivo específico de una skill: un script en `scripts/`, una referencia en `references/`, o un asset en `assets/`. |
+| `bootstrap_import` | Importa skills desde .ragnarok/ generado por fenrir bootstrap. Inserta skills detectadas del stack en la DB de Skoll. |
 
-    Skills --> Rules
-    Agents --> Skills
-    Workflows --> RSAW
-    Skills --> BootstrapImport
-```
+#### Rule Tools — Gestión de Reglas
 
-#### Skoll MCP Tools (28)
+| Tool | Descripción |
+|------|-------------|
+| `rule_list` | Lista todas las reglas activas, filtrables por categoría (quality, security, architecture). Muestra contenido y severity. |
+| `rule_check` | Verifica si una acción viola alguna regla. Retorna allowed: true/false y reglas que aplican. |
+| `rule_get` | Obtiene el detalle de una regla específica: contenido completo, categoría, severidad, y razón de existencia. |
 
-| Category | Tools |
-|----------|-------|
-| **Skills** | `skill_list`, `skill_load`, `skill_search`, `skill_verify`, `skill_read_file`, `bootstrap_import` |
-| **Rules** | `rule_list`, `rule_check`, `rule_get` |
-| **Agents** | `agent_list`, `agent_activate`, `agent_context`, `agent_handoff` |
-| **Workflows** | `workflow_start`, `workflow_progress`, `workflow_complete` |
-| **RSAW** | `dod_check`, `team_register`, `api_docs_check`, `api_usage_verify` |
+#### Agent Tools — Gestión de Agentes
+
+| Tool | Descripción |
+|------|-------------|
+| `agent_list` | Lista todos los agentes registrados en el equipo. Muestra scope, skills asignados, y si están activos. |
+| `agent_activate` | Activa un agente para un contexto específico. Retorna: allowed_tools (del skill activo), skills sugeridas, y contexto del AGENTS.md. Lee AGENTS.md anidados en monorepos. |
+| `agent_context` | Obtiene el contexto actual de un agente: skills activas, scope, reglas que aplican. |
+| `agent_handoff` | Transfiere trabajo de un agente a otro. Incluye el contrato (qué se hizo, qué falta) para continuidad. |
+
+#### Workflow Tools — Gestión de Flujos
+
+| Tool | Descripción |
+|------|-------------|
+| `workflow_start` | Inicia un workflow definido (ej: feature-development, bug-fix, refactor). Crea una nueva instancia con status "started". |
+| `workflow_step` | Registra un paso completado en el workflow. Permite trackear progreso por fases. |
+| `workflow_status` | Consulta el estado de un workflow: qué pasos completados, cuál es el actual, cuánto falta. |
+| `workflow_complete` | Marca un workflow como completado. Genera resumen de qué se hizo y métricas finales. |
+
+#### RSAW Tools — Validación RSAW
+
+| Tool | Descripción |
+|------|-------------|
+| `dod_check` | Verifica el Definition of Done: todas las standards cumplidas, specs verificadas, tests pasando. |
+| `team_register` | Registra un agente en un scope específico del equipo. Define quién es responsable de qué módulo. |
+| `api_docs_check` | Verifica que una API o endpoint existe en la documentación. Ayuda a no implementar contra APIs inexistentes. |
+
+#### Status Tools — Estado del Sistema
+
+| Tool | Descripción |
+|------|-------------|
+| `skoll_status` | Estado general de Skoll: skills disponibles, reglas activas, agentes registrados. |
+| `skoll_validate` | Valida el formato de todas las skills: frontmatter correcto, sin patrones injection, archivos accesibles. |
+
+---
 
 ### 3.4 Tyr (Security & Validation)
 
-```mermaid
-flowchart TB
-    subgraph Tyr["🛡️ TYR - Security & Validation"]
-        subgraph Precommit["⚡ PRE-COMMIT"]
-            Validate["precommit_validate"]
-            Autofix["precommit_autofix"]
-        end
+**¿Qué hace?**
+Tyr es el guardián de seguridad y validación. Valida código antes de commit, verifica packages antes de instalar, y asegura que standards de calidad se cumplan. Es quien responde "¿es seguro lo que hacemos?".
 
-        subgraph Packages["📦 PACKAGES"]
-            PkgCheck["pkg_check"]
-            PkgAudit["pkg_audit"]
-            CveAlerts["cve_alerts"]
-        end
+**¿Por qué es importante?**
+Sin Tyr, código con vulnerabilidades, licencias problemáticas o poor quality llega a producción. Con Tyr, cada cambio pasa por pre-commit validation, verification de dependencias, y checks de security antes de merge.
 
-        subgraph SAST["🔍 SAST"]
-            SastRun["sast_run"]
-            SastResolve["sast_resolve"]
-            SastList["sast_list"]
-        end
+---
 
-        subgraph Standards["📐 STANDARDS"]
-            StdRun["standard_run"]
-            StdRunAll["standard_run_all"]
-            StdList["standard_list"]
-        end
+#### Precommit Tools — Validación Pre-Commit
 
-        subgraph Scope["🎯 SCOPE"]
-            ScopeCheck["scope_check"]
-            ScopeViolations["scope_violations"]
-        end
+| Tool | Descripción |
+|------|-------------|
+| `precommit_validate` | Valida archivos antes de commit: syntax errors, imports faltantes, formatting. Soporta múltiples lenguajes. Retorna lista de errores y warnings. |
+| `precommit_autofix` | Auto-repara errores detectables: formatting, imports ordenados, syntax simple. Aplica fixes automáticamente cuando es seguro. |
 
-        subgraph Secrets["🔐 SECRETS"]
-            SecretsScan["secrets_scan"]
-            SecretsResolve["secrets_resolve"]
-        end
+#### Package Tools — Verificación de Dependencias
 
-        subgraph Security["🛡️ SECURITY"]
-            InjectGuard["inject_guard"]
-            Sanitize["sanitize"]
-            ProactiveScan["proactive_scan"]
-            BootstrapImport["bootstrap_import"]
-        end
-    end
+| Tool | Descripción |
+|------|-------------|
+| `pkg_check` | Verifica un package en registries públicos (npm, PyPI, crates.io, NuGet): existe?, es trusted?, tiene CVEs?, downloads mensuales, age, typosquatting risk. Consulta OSV.dev para vulnerabilidades. |
+| `pkg_license` | Obtiene la licencia de un package y verifica si es compatible con el proyecto. Detecta licencias copyleft o problemáticas. |
+| `pkg_audit` | Escanea dependencies de un proyecto por vulnerabilidades conocidas. Compara package-lock con databases de CVEs. |
+| `pkg_audit_snapshot` | Captura el estado actual de vulnerabilidades para comparar en el futuro. Baseline para detectar nuevas vulnerabilidades. |
+| `pkg_audit_continuous` | Monitoreo continuo: alerta cuando una dependencia existente recibe un nuevo CVE. |
 
-    Precommit --> Packages
-    Packages --> SAST
-    SAST --> Scope
-    Scope --> Secrets
-    Standards --> Precommit
-    Security --> Precommit
-```
+#### SAST Tools — Static Application Security Testing
 
-#### Tyr MCP Tools (21)
+| Tool | Descripción |
+|------|-------------|
+| `sast_run` | Ejecuta análisis estático en un target (archivo, directorio, modulo). Detecta patterns de código inseguro, hardcoded secrets, SQL injection, etc. |
+| `sast_findings` | Lista findings de SAST filtrables por severity (critical, high, medium, low) y status (open, resolved). |
+| `sast_resolve` | Marca un finding como resuelto con notas de por qué ya no aplica o cómo se mitigó. |
 
-| Category | Tools |
-|----------|-------|
-| **Precommit** | `precommit_validate`, `precommit_autofix` |
-| **Packages** | `pkg_check`, `pkg_audit`, `cve_alerts` |
-| **SAST** | `sast_run`, `sast_resolve`, `sast_list` |
-| **Standards** | `standard_run`, `standard_run_all`, `standard_list` |
-| **Scope** | `scope_check`, `scope_violations` |
-| **Secrets** | `secrets_scan`, `secrets_resolve` |
-| **Security** | `inject_guard`, `sanitize`, `proactive_scan`, `bootstrap_import` |
+#### Standard Tools — Quality Standards
+
+| Tool | Descripción |
+|------|-------------|
+| `standard_run` | Ejecuta un standard específico: lint, test, coverage. Verifica que el código cumple los quality gates. |
+| `standard_run_all` | Ejecuta todos los standards de un checkpoint_type: pre-commit, pre-merge, pre-deploy. Genera quality snapshot. |
+| `standard_list` | Lista todos los standards configurados: cuáles están activos, últimos resultados, pass_rate. |
+
+#### Scope Tools — Verificación de Scope
+
+| Tool | Descripción |
+|------|-------------|
+| `scope_check` | Verifica que el cambio está dentro del scope del plan. Detecta archivos modificados que no pertenecen al feature. |
+| `scope_violations` | Lista violaciones de scope: archivos tocados que no deberían, módulos no autorizados. |
+
+#### Security Tools — Análisis de Seguridad
+
+| Tool | Descripción |
+|------|-------------|
+| `inject_guard` | Detecta prompt injection en contenido externo: archivos leídos, APIs, user input. Previene ataques via malicious content. |
+| `sanitize` | Limpia contenido potencialmente peligroso: redacta secrets, remueve tags privados, sanitiza output. |
+| `proactive_scan` | Escaneo proactivo de un módulo: busca secrets hardcoded, patterns inseguros, dependencias vulnerables. |
+
+#### Import Tools — Integración
+
+| Tool | Descripción |
+|------|-------------|
+| `bootstrap_import` | Importa standards desde .ragnarok/ generado por fenrir bootstrap. Inserta standards de calidad en la DB de Tyr. |
+
+#### Audit Tools — Auditoría
+
+| Tool | Descripción |
+|------|-------------|
+| `audit_log` | Registra una acción en el audit log: quién, qué, cuándo, risk_level. Para compliance y追溯. |
+| `session_audit` | Obtiene todas las acciones de una sesión: tools usados, archivos tocados, decisiones tomadas. |
+
+#### Status Tools — Estado del Sistema
+
+| Tool | Descripción |
+|------|-------------|
+| `tyr_stats` | Estadísticas de Tyr: findings activos, vulnerabilities detectadas, audits ejecutados, violations. |
 
 ---
 

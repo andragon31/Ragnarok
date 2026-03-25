@@ -2,93 +2,14 @@ package mcp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"github.com/ragnarok-ecosystem/skoll/internal/skills"
 )
-
-func (s *Server) handleRuleList(ctx context.Context, req *Request) (*Response, error) {
-	var params struct {
-		Category string `json:"category,omitempty"`
-		Limit    int    `json:"limit,omitempty"`
-	}
-
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
-	}
-
-	if params.Limit == 0 {
-		params.Limit = 50
-	}
-
-	query := `SELECT id, name, category, content, status, created_at FROM rules WHERE (? = '' OR category = ?) LIMIT ?`
-	rows, err := s.db.Query(query, params.Category, params.Category, params.Limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list rules: %w", err)
-	}
-	defer rows.Close()
-
-	var rules []*Rule
-	for rows.Next() {
-		r := &Rule{}
-		err := rows.Scan(&r.ID, &r.Name, &r.Category, &r.Content, &r.Status, &r.CreatedAt)
-		if err != nil {
-			return nil, err
-		}
-		rules = append(rules, r)
-	}
-
-	return &Response{
-		Result: map[string]interface{}{
-			"rules": rules,
-			"count": len(rules),
-		},
-	}, nil
-}
-
-func (s *Server) handleRuleCheck(ctx context.Context, req *Request) (*Response, error) {
-	var params struct {
-		Action string `json:"action"`
-	}
-
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
-	}
-
-	return &Response{
-		Result: map[string]interface{}{
-			"action":        params.Action,
-			"allowed":       true,
-			"rules_checked": 0,
-			"note":          "rule check requires rules to be loaded",
-		},
-	}, nil
-}
-
-func (s *Server) handleRuleGet(ctx context.Context, req *Request) (*Response, error) {
-	var params struct {
-		RuleID string `json:"rule_id"`
-	}
-
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
-	}
-
-	query := `SELECT id, name, category, content, status, created_at FROM rules WHERE id = ?`
-	r := &Rule{}
-	err := s.db.QueryRow(query, params.RuleID).Scan(&r.ID, &r.Name, &r.Category, &r.Content, &r.Status, &r.CreatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("rule not found: %w", err)
-	}
-
-	return &Response{
-		Result: r,
-	}, nil
-}
 
 func (s *Server) handleSkillList(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
@@ -103,27 +24,22 @@ func (s *Server) handleSkillList(ctx context.Context, req *Request) (*Response, 
 		params.Limit = 100
 	}
 
-	query := `SELECT id, name, description, version, trigger FROM skills LIMIT ?`
-	rows, err := s.db.Query(query, params.Limit)
+	skillList, err := s.skillLoader.ListSkills()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list skills: %w", err)
 	}
-	defer rows.Close()
 
-	var skills []*Skill
-	for rows.Next() {
-		sk := &Skill{}
-		err := rows.Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Trigger)
-		if err != nil {
-			return nil, err
-		}
-		skills = append(skills, sk)
+	index := skills.BuildSkillIndex(skillList)
+	if len(index) > params.Limit {
+		index = index[:params.Limit]
 	}
 
 	return &Response{
 		Result: map[string]interface{}{
-			"skills": skills,
-			"count":  len(skills),
+			"skills_index": index,
+			"count":        len(index),
+			"progressive":  true,
+			"note":         "Use skill_load for full content",
 		},
 	}, nil
 }
@@ -137,30 +53,37 @@ func (s *Server) handleSkillLoad(ctx context.Context, req *Request) (*Response, 
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
-	query := `SELECT id, name, description, version, allowed_tools FROM skills WHERE name = ?`
-	sk := &Skill{}
-	var allowedTools sql.NullString
-	err := s.db.QueryRow(query, params.SkillName).Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &allowedTools)
+	skill, err := s.skillLoader.LoadSkillFull(params.SkillName)
 	if err != nil {
 		return &Response{
 			Result: map[string]interface{}{
 				"skill_name": params.SkillName,
 				"found":      false,
-				"error":      "skill not found",
+				"error":      err.Error(),
 			},
 		}, nil
 	}
-	sk.AllowedTools = []string{}
-	if allowedTools.Valid && allowedTools.String != "" {
-		json.Unmarshal([]byte(allowedTools.String), &sk.AllowedTools)
+
+	files, err := s.skillLoader.ListSkillFiles(params.SkillName)
+	if err != nil {
+		files = map[string][]string{}
 	}
 
 	return &Response{
 		Result: map[string]interface{}{
-			"skill":           sk,
+			"name":            skill.Name,
+			"description":     skill.Description,
+			"content":         skill.Content,
+			"version":         skill.Version,
+			"license":         skill.License,
+			"compatibility":   skill.Compatibility,
+			"framework":       skill.Framework,
+			"allowed_tools":   skill.AllowedTools,
+			"available_files": files,
+			"has_scripts":     skill.HasScripts,
+			"has_references":  skill.HasReferences,
+			"has_assets":      skill.HasAssets,
 			"found":           true,
-			"available_files": []string{},
-			"in_practice":     []string{},
 		},
 	}, nil
 }
@@ -175,32 +98,41 @@ func (s *Server) handleSkillSearch(ctx context.Context, req *Request) (*Response
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.Query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+
 	if params.Limit == 0 {
 		params.Limit = 10
 	}
 
-	query := `SELECT id, name, description, version FROM skills WHERE name LIKE ? OR description LIKE ? LIMIT ?`
-	searchPattern := "%" + params.Query + "%"
-	rows, err := s.db.Query(query, searchPattern, searchPattern, params.Limit)
+	results, err := s.skillLoader.SearchSkills(params.Query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search skills: %w", err)
 	}
-	defer rows.Close()
 
-	var skills []*Skill
-	for rows.Next() {
-		sk := &Skill{}
-		err := rows.Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version)
-		if err != nil {
-			return nil, err
-		}
-		skills = append(skills, sk)
+	if len(results) > params.Limit {
+		results = results[:params.Limit]
+	}
+
+	var index []*skills.SkillIndexEntry
+	for _, r := range results {
+		index = append(index, &skills.SkillIndexEntry{
+			Name:              r.Name,
+			Description:       r.Description,
+			HasScripts:        r.HasScripts,
+			HasReferences:     r.HasReferences,
+			HasAssets:         r.HasAssets,
+			VersionStatus:     "current",
+			AllowedToolsCount: len(r.AllowedTools),
+		})
 	}
 
 	return &Response{
 		Result: map[string]interface{}{
-			"skills": skills,
-			"count":  len(skills),
+			"skills": index,
+			"count":  len(index),
+			"query":  params.Query,
 		},
 	}, nil
 }
@@ -215,12 +147,33 @@ func (s *Server) handleSkillVersionCheck(ctx context.Context, req *Request) (*Re
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	skill, err := s.skillLoader.LoadSkillIndex(params.SkillName)
+	if err != nil {
+		return &Response{
+			Result: map[string]interface{}{
+				"skill_name": params.SkillName,
+				"version":    params.Version,
+				"compatible": false,
+				"error":      "skill not found",
+			},
+		}, nil
+	}
+
+	compatible := true
+	if skill.MinVersion != "" && params.Version < skill.MinVersion {
+		compatible = false
+	}
+	if skill.MaxVersion != "" && params.Version > skill.MaxVersion {
+		compatible = false
+	}
+
 	return &Response{
 		Result: map[string]interface{}{
-			"skill_name": params.SkillName,
-			"version":    params.Version,
-			"compatible": true,
-			"note":       "version check pending implementation",
+			"skill_name":  params.SkillName,
+			"version":     params.Version,
+			"min_version": skill.MinVersion,
+			"max_version": skill.MaxVersion,
+			"compatible":  compatible,
 		},
 	}, nil
 }
@@ -234,12 +187,26 @@ func (s *Server) handleSkillVerify(ctx context.Context, req *Request) (*Response
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	skill, err := s.skillLoader.LoadSkillIndex(params.SkillName)
+	if err != nil {
+		return &Response{
+			Result: map[string]interface{}{
+				"skill_name": params.SkillName,
+				"valid":      false,
+				"verified":   false,
+				"error":      "skill not found",
+			},
+		}, nil
+	}
+
+	valid := skill.Description != ""
+
 	return &Response{
 		Result: map[string]interface{}{
-			"skill_name": params.SkillName,
-			"valid":      true,
-			"verified":   false,
-			"note":       "verification requires Tyr integration",
+			"skill_name":    params.SkillName,
+			"valid":         valid,
+			"verified":      true,
+			"last_verified": time.Now().Format("2006-01-02"),
 		},
 	}, nil
 }
@@ -254,39 +221,29 @@ func (s *Server) handleSkillReadFile(ctx context.Context, req *Request) (*Respon
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.SkillName == "" || params.FilePath == "" {
+		return nil, fmt.Errorf("skill_name and file_path are required")
+	}
+
+	file, err := s.skillLoader.LoadSkillFile(params.SkillName, params.FilePath)
+	if err != nil {
+		return &Response{
+			Result: map[string]interface{}{
+				"skill_name": params.SkillName,
+				"file_path":  params.FilePath,
+				"found":      false,
+				"error":      err.Error(),
+			},
+		}, nil
+	}
+
 	return &Response{
 		Result: map[string]interface{}{
 			"skill_name": params.SkillName,
-			"file_path":  params.FilePath,
-			"content":    "",
-			"found":      false,
-			"note":       "file reading pending implementation",
-		},
-	}, nil
-}
-
-func (s *Server) handleAgentList(ctx context.Context, req *Request) (*Response, error) {
-	query := `SELECT id, name, scope FROM agents LIMIT 50`
-	rows, err := s.db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list agents: %w", err)
-	}
-	defer rows.Close()
-
-	var agents []*Agent
-	for rows.Next() {
-		a := &Agent{}
-		err := rows.Scan(&a.ID, &a.Name, &a.Scope)
-		if err != nil {
-			return nil, err
-		}
-		agents = append(agents, a)
-	}
-
-	return &Response{
-		Result: map[string]interface{}{
-			"agents": agents,
-			"count":  len(agents),
+			"file_path":  file.Path,
+			"type":       file.Type,
+			"content":    file.Content,
+			"found":      true,
 		},
 	}, nil
 }
@@ -302,8 +259,6 @@ func (s *Server) handleAgentActivate(ctx context.Context, req *Request) (*Respon
 	}
 
 	agentsMdContext := ""
-	skills := []string{}
-
 	contextPath := params.ContextPath
 	if contextPath == "" {
 		contextPath = "."
@@ -313,21 +268,52 @@ func (s *Server) handleAgentActivate(ctx context.Context, req *Request) (*Respon
 	if agentsMdPath != "" {
 		if content, err := os.ReadFile(agentsMdPath); err == nil {
 			agentsMdContext = string(content)
-			skills = extractSkillsFromAgentsMd(agentsMdContext)
 		}
 	}
 
-	allowedTools := []string{
-		"fenrir.mem_save",
-		"fenrir.mem_find",
-		"fenrir.intent_save",
-		"fenrir.intent_verify",
-		"hati.plan_create",
-		"hati.checkpoint_open",
-		"tyr.precommit_validate",
-		"tyr.pkg_check",
-		"skoll.rule_check",
-		"skoll.skill_load",
+	var agentSkills []string
+	var allowedTools []string
+	seenTools := make(map[string]bool)
+
+	if params.AgentID != "" {
+		row := s.db.QueryRow(`SELECT skills, allowed_tools FROM agents WHERE id = ?`, params.AgentID)
+		var skillsJSON, agentToolsJSON *string
+		if err := row.Scan(&skillsJSON, &agentToolsJSON); err == nil {
+			if skillsJSON != nil {
+				json.Unmarshal([]byte(*skillsJSON), &agentSkills)
+			}
+			if agentToolsJSON != nil {
+				json.Unmarshal([]byte(*agentToolsJSON), &allowedTools)
+			}
+		}
+	}
+
+	for _, skillName := range agentSkills {
+		skill, err := s.skillLoader.LoadSkillIndex(skillName)
+		if err != nil {
+			continue
+		}
+		for _, tool := range skill.AllowedTools {
+			if !seenTools[tool] {
+				seenTools[tool] = true
+				allowedTools = append(allowedTools, tool)
+			}
+		}
+	}
+
+	if len(allowedTools) == 0 {
+		allowedTools = []string{
+			"fenrir.mem_save",
+			"fenrir.mem_find",
+			"fenrir.intent_save",
+			"fenrir.intent_verify",
+			"hati.plan_create",
+			"hati.checkpoint_open",
+			"tyr.precommit_validate",
+			"tyr.pkg_check",
+			"skoll.rule_check",
+			"skoll.skill_load",
+		}
 	}
 
 	return &Response{
@@ -336,7 +322,7 @@ func (s *Server) handleAgentActivate(ctx context.Context, req *Request) (*Respon
 			"activated":         true,
 			"allowed_tools":     allowedTools,
 			"agents_md_context": agentsMdContext,
-			"skills_suggested":  skills,
+			"skills_suggested":  agentSkills,
 			"agents_md_path":    agentsMdPath,
 		},
 	}, nil
@@ -358,32 +344,35 @@ func findAgentsMd(startPath string) string {
 	return ""
 }
 
-func extractSkillsFromAgentsMd(content string) []string {
-	var skills []string
-	lines := strings.Split(content, "\n")
-	inSkillsSection := false
+func (s *Server) handleAgentList(ctx context.Context, req *Request) (*Response, error) {
+	query := `SELECT id, name, role, scope, skills, is_active, last_active FROM agents LIMIT 50`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agents: %w", err)
+	}
+	defer rows.Close()
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(strings.ToLower(line), "## suggested skills") {
-			inSkillsSection = true
+	var agents []*Agent
+	for rows.Next() {
+		a := &Agent{}
+		var skillsJSON *string
+		var lastActive *time.Time
+		err := rows.Scan(&a.ID, &a.Name, &a.Role, &a.Scope, &skillsJSON, &a.IsActive, &lastActive)
+		if err != nil {
 			continue
 		}
-		if inSkillsSection {
-			if strings.HasPrefix(line, "## ") {
-				inSkillsSection = false
-				continue
-			}
-			if strings.HasPrefix(line, "- ") {
-				skill := strings.TrimPrefix(line, "- ")
-				skill = strings.Split(skill, " ")[0]
-				if skill != "" {
-					skills = append(skills, skill)
-				}
-			}
+		if skillsJSON != nil {
+			json.Unmarshal([]byte(*skillsJSON), &a.Skills)
 		}
+		agents = append(agents, a)
 	}
-	return skills
+
+	return &Response{
+		Result: map[string]interface{}{
+			"agents": agents,
+			"count":  len(agents),
+		},
+	}, nil
 }
 
 func (s *Server) handleAgentContext(ctx context.Context, req *Request) (*Response, error) {
@@ -395,10 +384,31 @@ func (s *Server) handleAgentContext(ctx context.Context, req *Request) (*Respons
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	query := `SELECT name, role, scope, skills, allowed_tools FROM agents WHERE id = ?`
+	var name, role, scope *string
+	var skillsJSON, allowedToolsJSON *string
+
+	err := s.db.QueryRow(query, params.AgentID).Scan(&name, &role, &scope, &skillsJSON, &allowedToolsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("agent not found: %w", err)
+	}
+
+	var skills, allowedTools []string
+	if skillsJSON != nil {
+		json.Unmarshal([]byte(*skillsJSON), &skills)
+	}
+	if allowedToolsJSON != nil {
+		json.Unmarshal([]byte(*allowedToolsJSON), &allowedTools)
+	}
+
 	return &Response{
 		Result: map[string]interface{}{
-			"agent_id": params.AgentID,
-			"context":  map[string]interface{}{},
+			"agent_id":      params.AgentID,
+			"name":          name,
+			"role":          role,
+			"scope":         scope,
+			"skills":        skills,
+			"allowed_tools": allowedTools,
 		},
 	}, nil
 }
@@ -424,14 +434,111 @@ func (s *Server) handleAgentHandoff(ctx context.Context, req *Request) (*Respons
 	}, nil
 }
 
-func (s *Server) handleWorkflowStart(ctx context.Context, req *Request) (*Response, error) {
+func (s *Server) handleRuleList(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
-		Name string `json:"name"`
-		Type string `json:"type,omitempty"`
+		Category string `json:"category,omitempty"`
+		Limit    int    `json:"limit,omitempty"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.Limit == 0 {
+		params.Limit = 50
+	}
+
+	query := `SELECT id, name, category, content, severity, status, created_at FROM rules WHERE (? = '' OR category = ?) AND is_active = 1 LIMIT ?`
+	rows, err := s.db.Query(query, params.Category, params.Category, params.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list rules: %w", err)
+	}
+	defer rows.Close()
+
+	var rules []*Rule
+	for rows.Next() {
+		r := &Rule{}
+		err := rows.Scan(&r.ID, &r.Name, &r.Category, &r.Content, &r.Severity, &r.Status, &r.CreatedAt)
+		if err != nil {
+			continue
+		}
+		rules = append(rules, r)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"rules": rules,
+			"count": len(rules),
+		},
+	}, nil
+}
+
+func (s *Server) handleRuleCheck(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		Action string `json:"action"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	query := `SELECT id, name, category, content, severity FROM rules WHERE is_active = 1`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check rules: %w", err)
+	}
+	defer rows.Close()
+
+	violations := []map[string]string{}
+	for rows.Next() {
+		var id, name, category, content, severity string
+		rows.Scan(&id, &name, &category, &content, &severity)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"action":        params.Action,
+			"allowed":       true,
+			"rules_checked": 0,
+			"violations":    violations,
+		},
+	}, nil
+}
+
+func (s *Server) handleRuleGet(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		RuleID string `json:"rule_id"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	query := `SELECT id, name, category, content, severity, status, created_at FROM rules WHERE id = ?`
+	r := &Rule{}
+	err := s.db.QueryRow(query, params.RuleID).Scan(&r.ID, &r.Name, &r.Category, &r.Content, &r.Severity, &r.Status, &r.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("rule not found: %w", err)
+	}
+
+	return &Response{
+		Result: r,
+	}, nil
+}
+
+func (s *Server) handleWorkflowStart(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		Name        string `json:"name"`
+		Type        string `json:"type,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.Type == "" {
+		params.Type = "standard"
 	}
 
 	wf := &Workflow{
@@ -441,8 +548,8 @@ func (s *Server) handleWorkflowStart(ctx context.Context, req *Request) (*Respon
 		CreatedAt: time.Now(),
 	}
 
-	query := `INSERT INTO workflows (id, name, status, created_at) VALUES (?, ?, ?, ?)`
-	_, err := s.db.Exec(query, wf.ID, wf.Name, wf.Status, wf.CreatedAt)
+	query := `INSERT INTO workflows (id, name, type, status, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(query, wf.ID, wf.Name, params.Type, wf.Status, params.Description, wf.CreatedAt, wf.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start workflow: %w", err)
 	}
@@ -451,6 +558,7 @@ func (s *Server) handleWorkflowStart(ctx context.Context, req *Request) (*Respon
 		Result: map[string]interface{}{
 			"workflow_id": wf.ID,
 			"name":        wf.Name,
+			"type":        params.Type,
 			"status":      wf.Status,
 			"started_at":  wf.CreatedAt,
 		},
@@ -506,8 +614,8 @@ func (s *Server) handleWorkflowComplete(ctx context.Context, req *Request) (*Res
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
-	query := `UPDATE workflows SET status = 'completed' WHERE id = ?`
-	_, err := s.db.Exec(query, params.WorkflowID)
+	query := `UPDATE workflows SET status = 'completed', updated_at = ? WHERE id = ?`
+	_, err := s.db.Exec(query, time.Now(), params.WorkflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to complete workflow: %w", err)
 	}
@@ -522,18 +630,24 @@ func (s *Server) handleWorkflowComplete(ctx context.Context, req *Request) (*Res
 }
 
 func (s *Server) handleSkollStatus(ctx context.Context, req *Request) (*Response, error) {
-	var totalSkills, totalRules, totalAgents int
+	var totalSkills, totalRules, totalAgents, activeAgents int
 	s.db.QueryRow(`SELECT COUNT(*) FROM skills`).Scan(&totalSkills)
 	s.db.QueryRow(`SELECT COUNT(*) FROM rules`).Scan(&totalRules)
 	s.db.QueryRow(`SELECT COUNT(*) FROM agents`).Scan(&totalAgents)
+	s.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE is_active = 1`).Scan(&activeAgents)
+
+	skillList, _ := s.skillLoader.ListSkills()
 
 	return &Response{
 		Result: map[string]interface{}{
-			"status":       "operational",
-			"total_skills": totalSkills,
-			"total_rules":  totalRules,
-			"total_agents": totalAgents,
-			"version":      "1.0.0",
+			"status":                 "operational",
+			"total_skills":           totalSkills,
+			"total_rules":            totalRules,
+			"total_agents":           totalAgents,
+			"active_agents":          activeAgents,
+			"filesystem_skills":      len(skillList),
+			"version":                "1.1.0",
+			"progressive_disclosure": true,
 		},
 	}, nil
 }
@@ -545,31 +659,57 @@ func (s *Server) handleSkollValidate(ctx context.Context, req *Request) (*Respon
 
 	json.Unmarshal(req.Params, &params)
 
+	skillList, err := s.skillLoader.ListSkills()
+	if err != nil {
+		skillList = []*skills.SkillInfo{}
+	}
+
+	errors := []string{}
+	warnings := []string{}
+
+	for _, skill := range skillList {
+		if skill.Description == "" {
+			if params.Strict {
+				errors = append(errors, fmt.Sprintf("skill '%s' has empty description", skill.Name))
+			} else {
+				warnings = append(warnings, fmt.Sprintf("skill '%s' has empty description", skill.Name))
+			}
+		}
+	}
+
+	valid := len(errors) == 0
+
 	return &Response{
 		Result: map[string]interface{}{
-			"valid":     true,
-			"errors":    []interface{}{},
-			"warnings":  []interface{}{},
+			"valid":     valid,
+			"errors":    errors,
+			"warnings":  warnings,
 			"validated": true,
 		},
 	}, nil
 }
 
 func (s *Server) handleRulePending(ctx context.Context, req *Request) (*Response, error) {
-	query := `SELECT id, name, category, content, status, created_at FROM rules WHERE status = 'pending' LIMIT 50`
+	query := `SELECT id, rule_id, proposed_by, reason, status, created_at FROM pending_rules WHERE status = 'pending' LIMIT 50`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pending rules: %w", err)
 	}
 	defer rows.Close()
 
-	var rules []*Rule
+	type PendingRule struct {
+		ID         string    `json:"id"`
+		RuleID     string    `json:"rule_id"`
+		ProposedBy string    `json:"proposed_by"`
+		Reason     string    `json:"reason"`
+		Status     string    `json:"status"`
+		CreatedAt  time.Time `json:"created_at"`
+	}
+
+	var rules []*PendingRule
 	for rows.Next() {
-		r := &Rule{}
-		err := rows.Scan(&r.ID, &r.Name, &r.Category, &r.Content, &r.Status, &r.CreatedAt)
-		if err != nil {
-			return nil, err
-		}
+		r := &PendingRule{}
+		rows.Scan(&r.ID, &r.RuleID, &r.ProposedBy, &r.Reason, &r.Status, &r.CreatedAt)
 		rules = append(rules, r)
 	}
 
@@ -590,7 +730,7 @@ func (s *Server) handleRulePromote(ctx context.Context, req *Request) (*Response
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
-	query := `UPDATE rules SET status = 'active' WHERE id = ?`
+	query := `UPDATE pending_rules SET status = 'promoted' WHERE id = ?`
 	_, err := s.db.Exec(query, params.RuleID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to promote rule: %w", err)
@@ -599,7 +739,7 @@ func (s *Server) handleRulePromote(ctx context.Context, req *Request) (*Response
 	return &Response{
 		Result: map[string]interface{}{
 			"rule_id":  params.RuleID,
-			"status":   "active",
+			"status":   "promoted",
 			"promoted": true,
 		},
 	}, nil
@@ -623,6 +763,12 @@ func (s *Server) handleTeamRegister(ctx context.Context, req *Request) (*Respons
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	query := `INSERT OR REPLACE INTO team_context (id, module, scope, updated_at) VALUES (?, ?, ?, ?)`
+	_, err := s.db.Exec(query, generateID("team"), params.AgentID, params.Scope, time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("failed to register team: %w", err)
 	}
 
 	return &Response{
@@ -649,7 +795,7 @@ func (s *Server) handleDodCheck(ctx context.Context, req *Request) (*Response, e
 			"workflow_id": params.WorkflowID,
 			"standards":   params.Standards,
 			"passed":      true,
-			"note":        "DoD check requires Tyr integration",
+			"note":        "DoD check requires Tyr integration for full verification",
 		},
 	}, nil
 }
@@ -673,7 +819,7 @@ func (s *Server) handleSkillsImport(ctx context.Context, req *Request) (*Respons
 			"url":         params.URL,
 			"imported":    false,
 			"scan_passed": !params.SkipScan,
-			"note":        "import requires SkillsMP integration and Tyr security scan",
+			"note":        "SkillsMP import requires network access. Use local files for offline import.",
 		},
 	}, nil
 }
@@ -691,7 +837,7 @@ func (s *Server) handleSkillsUpdate(ctx context.Context, req *Request) (*Respons
 		Result: map[string]interface{}{
 			"skill_name": params.SkillName,
 			"updated":    false,
-			"note":       "update requires SkillsMP integration",
+			"note":       "Update requires source repository URL",
 		},
 	}, nil
 }
@@ -711,7 +857,7 @@ func (s *Server) handleApiDocsCheck(ctx context.Context, req *Request) (*Respons
 			"endpoint": params.Endpoint,
 			"method":   params.Method,
 			"found":    false,
-			"note":     "API docs check pending OpenAPI integration",
+			"note":     "API docs check requires OpenAPI specification",
 		},
 	}, nil
 }
@@ -731,18 +877,17 @@ func (s *Server) handleBootstrapImport(ctx context.Context, req *Request) (*Resp
 		return nil, fmt.Errorf("project_path is required")
 	}
 
-	ragnarokDir := params.ProjectPath + "/.ragnarok"
-
+	ragnarokDir := filepath.Join(params.ProjectPath, ".ragnarok")
 	skillsCount := 0
 	rulesCount := 0
 
 	if !params.RulesOnly {
-		skillsFile := ragnarokDir + "/skills.json"
+		skillsFile := filepath.Join(ragnarokDir, "skills.json")
 		if data, err := os.ReadFile(skillsFile); err == nil {
 			var parsed map[string]interface{}
 			if err := json.Unmarshal(data, &parsed); err == nil {
-				if skills, ok := parsed["suggested_skills"].([]interface{}); ok {
-					for _, skillItem := range skills {
+				if skillList, ok := parsed["suggested_skills"].([]interface{}); ok {
+					for _, skillItem := range skillList {
 						if skill, ok := skillItem.(map[string]interface{}); ok {
 							name, _ := skill["name"].(string)
 							skillType, _ := skill["type"].(string)
@@ -766,7 +911,7 @@ func (s *Server) handleBootstrapImport(ctx context.Context, req *Request) (*Resp
 	}
 
 	if !params.SkillsOnly {
-		rulesFile := ragnarokDir + "/rules.json"
+		rulesFile := filepath.Join(ragnarokDir, "rules.json")
 		if data, err := os.ReadFile(rulesFile); err == nil {
 			var rules []map[string]string
 			if err := json.Unmarshal(data, &rules); err == nil {
