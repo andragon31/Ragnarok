@@ -1,0 +1,195 @@
+package mcp
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"time"
+
+	"github.com/ragnarok-ecosystem/tyr/internal/config"
+)
+
+type Server struct {
+	port     int
+	config   *config.Config
+	db       *sql.DB
+	handlers map[string]ToolHandler
+}
+
+type ToolHandler func(ctx context.Context, req *Request) (*Response, error)
+
+type Request struct {
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params,omitempty"`
+	ID     string          `json:"id,omitempty"`
+}
+
+type Response struct {
+	Result interface{} `json:"result,omitempty"`
+	Error  *Error      `json:"error,omitempty"`
+	ID     string      `json:"id,omitempty"`
+}
+
+type Error struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+type PkgCheckResult struct {
+	Name              string    `json:"name"`
+	Ecosystem         string    `json:"ecosystem"`
+	Version           string    `json:"version,omitempty"`
+	Exists            bool      `json:"exists"`
+	Trusted           bool      `json:"trusted"`
+	CVECount          int       `json:"cve_count"`
+	AgeDays           int       `json:"age_days"`
+	DownloadsMonthly  int       `json:"downloads_monthly"`
+	TyposquattingRisk bool      `json:"typosquatting_risk"`
+	LastChecked       time.Time `json:"last_checked"`
+}
+
+type SASTFinding struct {
+	ID        string    `json:"id"`
+	RuleID    string    `json:"rule_id"`
+	Severity  string    `json:"severity"`
+	File      string    `json:"file"`
+	Line      int       `json:"line"`
+	Message   string    `json:"message"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type AuditEntry struct {
+	ID         string    `json:"id"`
+	SessionID  string    `json:"session_id,omitempty"`
+	Tool       string    `json:"tool"`
+	ActionType string    `json:"action_type"`
+	Target     string    `json:"target"`
+	RiskLevel  string    `json:"risk_level"`
+	Result     string    `json:"result"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type Standard struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Category    string  `json:"category"`
+	LastResult  string  `json:"last_result,omitempty"`
+	PassRate    float64 `json:"pass_rate,omitempty"`
+}
+
+func NewServer(cfg *config.Config, db *sql.DB) *Server {
+	s := &Server{
+		port:     cfg.Port,
+		config:   cfg,
+		db:       db,
+		handlers: make(map[string]ToolHandler),
+	}
+	s.registerHandlers()
+	return s
+}
+
+func (s *Server) registerHandlers() {
+	s.handlers["pkg_check"] = s.handlePkgCheck
+	s.handlers["pkg_license"] = s.handlePkgLicense
+	s.handlers["pkg_audit"] = s.handlePkgAudit
+	s.handlers["pkg_audit_snapshot"] = s.handlePkgAuditSnapshot
+	s.handlers["pkg_audit_continuous"] = s.handlePkgAuditContinuous
+
+	s.handlers["sast_run"] = s.handleSastRun
+	s.handlers["sast_findings"] = s.handleSastFindings
+	s.handlers["sast_resolve"] = s.handleSastResolve
+
+	s.handlers["audit_log"] = s.handleAuditLog
+	s.handlers["session_audit"] = s.handleSessionAudit
+	s.handlers["inject_guard"] = s.handleInjectGuard
+	s.handlers["proactive_scan"] = s.handleProactiveScan
+	s.handlers["sanitize"] = s.handleSanitize
+
+	s.handlers["standard_run"] = s.handleStandardRun
+	s.handlers["standard_run_all"] = s.handleStandardRunAll
+	s.handlers["standard_list"] = s.handleStandardList
+	s.handlers["quality_snapshot"] = s.handleQualitySnapshot
+
+	s.handlers["scope_violations"] = s.handleScopeViolations
+	s.handlers["tyr_stats"] = s.handleTyrStats
+
+	s.handlers["precommit_validate"] = s.handlePrecommitValidate
+	s.handlers["precommit_autofix"] = s.handlePrecommitAutofix
+	s.handlers["bootstrap_import"] = s.handleBootstrapImport
+}
+
+func (s *Server) HandleRequest(ctx context.Context, raw []byte) ([]byte, error) {
+	var req Request
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return s.errorResponse(req.ID, -32700, "Parse error: "+err.Error())
+	}
+
+	handler, ok := s.handlers[req.Method]
+	if !ok {
+		return s.errorResponse(req.ID, -32601, fmt.Sprintf("Method not found: %s", req.Method))
+	}
+
+	result, err := handler(ctx, &req)
+	if err != nil {
+		return s.errorResponse(req.ID, -32603, "Internal error: "+err.Error())
+	}
+
+	resp := &Response{
+		Result: result,
+		ID:     req.ID,
+	}
+	return json.Marshal(resp)
+}
+
+func (s *Server) errorResponse(id string, code int, msg string) ([]byte, error) {
+	resp := &Response{
+		Error: &Error{Code: code, Message: msg},
+		ID:    id,
+	}
+	return json.Marshal(resp)
+}
+
+func (s *Server) Run(ctx context.Context) error {
+	addr := fmt.Sprintf(":%d", s.port)
+	log.Printf("Tyr MCP server running on %s", addr)
+
+	stdin := os.NewFile(uintptr(os.Stdin.Fd()), "stdin")
+	stdout := os.NewFile(uintptr(os.Stdout.Fd()), "stdout")
+	decoder := json.NewDecoder(stdin)
+	encoder := json.NewEncoder(stdout)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			var raw json.RawMessage
+			if err := decoder.Decode(&raw); err != nil {
+				log.Printf("Decode error: %v", err)
+				continue
+			}
+
+			resp, err := s.HandleRequest(ctx, raw)
+			if err != nil {
+				log.Printf("Handle error: %v", err)
+				continue
+			}
+
+			if err := encoder.Encode(resp); err != nil {
+				log.Printf("Encode error: %v", err)
+			}
+		}
+	}
+}
+
+var idCounter = 0
+
+func generateID(prefix string) string {
+	idCounter++
+	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), idCounter)
+}

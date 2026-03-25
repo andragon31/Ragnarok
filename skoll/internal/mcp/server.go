@@ -1,0 +1,194 @@
+package mcp
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"time"
+
+	"github.com/ragnarok-ecosystem/skoll/internal/config"
+)
+
+type Server struct {
+	port     int
+	config   *config.Config
+	db       *sql.DB
+	handlers map[string]ToolHandler
+}
+
+type ToolHandler func(ctx context.Context, req *Request) (*Response, error)
+
+type Request struct {
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params,omitempty"`
+	ID     string          `json:"id,omitempty"`
+}
+
+type Response struct {
+	Result interface{} `json:"result,omitempty"`
+	Error  *Error      `json:"error,omitempty"`
+	ID     string      `json:"id,omitempty"`
+}
+
+type Error struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+type Skill struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	Version      string    `json:"version,omitempty"`
+	Trigger      string    `json:"trigger,omitempty"`
+	AllowedTools []string  `json:"allowed_tools,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type Rule struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Category  string    `json:"category"`
+	Content   string    `json:"content,omitempty"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Agent struct {
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Skills []string `json:"skills,omitempty"`
+	Scope  string   `json:"scope,omitempty"`
+}
+
+type Workflow struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func NewServer(cfg *config.Config, db *sql.DB) *Server {
+	s := &Server{
+		port:     cfg.Port,
+		config:   cfg,
+		db:       db,
+		handlers: make(map[string]ToolHandler),
+	}
+	s.registerHandlers()
+	return s
+}
+
+func (s *Server) registerHandlers() {
+	s.handlers["rule_list"] = s.handleRuleList
+	s.handlers["rule_check"] = s.handleRuleCheck
+	s.handlers["rule_get"] = s.handleRuleGet
+
+	s.handlers["skill_list"] = s.handleSkillList
+	s.handlers["skill_load"] = s.handleSkillLoad
+	s.handlers["skill_search"] = s.handleSkillSearch
+	s.handlers["skill_version_check"] = s.handleSkillVersionCheck
+	s.handlers["skill_verify"] = s.handleSkillVerify
+	s.handlers["skill_read_file"] = s.handleSkillReadFile
+
+	s.handlers["agent_list"] = s.handleAgentList
+	s.handlers["agent_activate"] = s.handleAgentActivate
+	s.handlers["agent_context"] = s.handleAgentContext
+	s.handlers["agent_handoff"] = s.handleAgentHandoff
+
+	s.handlers["workflow_start"] = s.handleWorkflowStart
+	s.handlers["workflow_step"] = s.handleWorkflowStep
+	s.handlers["workflow_status"] = s.handleWorkflowStatus
+	s.handlers["workflow_complete"] = s.handleWorkflowComplete
+
+	s.handlers["skoll_status"] = s.handleSkollStatus
+	s.handlers["skoll_validate"] = s.handleSkollValidate
+
+	s.handlers["rule_pending"] = s.handleRulePending
+	s.handlers["rule_promote"] = s.handleRulePromote
+
+	s.handlers["team_status"] = s.handleTeamStatus
+	s.handlers["team_register"] = s.handleTeamRegister
+
+	s.handlers["dod_check"] = s.handleDodCheck
+
+	s.handlers["skills_import"] = s.handleSkillsImport
+	s.handlers["skills_update"] = s.handleSkillsUpdate
+	s.handlers["api_docs_check"] = s.handleApiDocsCheck
+	s.handlers["bootstrap_import"] = s.handleBootstrapImport
+}
+
+func (s *Server) HandleRequest(ctx context.Context, raw []byte) ([]byte, error) {
+	var req Request
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return s.errorResponse(req.ID, -32700, "Parse error: "+err.Error())
+	}
+
+	handler, ok := s.handlers[req.Method]
+	if !ok {
+		return s.errorResponse(req.ID, -32601, fmt.Sprintf("Method not found: %s", req.Method))
+	}
+
+	result, err := handler(ctx, &req)
+	if err != nil {
+		return s.errorResponse(req.ID, -32603, "Internal error: "+err.Error())
+	}
+
+	resp := &Response{
+		Result: result,
+		ID:     req.ID,
+	}
+	return json.Marshal(resp)
+}
+
+func (s *Server) errorResponse(id string, code int, msg string) ([]byte, error) {
+	resp := &Response{
+		Error: &Error{Code: code, Message: msg},
+		ID:    id,
+	}
+	return json.Marshal(resp)
+}
+
+func (s *Server) Run(ctx context.Context) error {
+	addr := fmt.Sprintf(":%d", s.port)
+	log.Printf("Skoll MCP server running on %s", addr)
+
+	stdin := os.NewFile(uintptr(os.Stdin.Fd()), "stdin")
+	stdout := os.NewFile(uintptr(os.Stdout.Fd()), "stdout")
+	decoder := json.NewDecoder(stdin)
+	encoder := json.NewEncoder(stdout)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			var raw json.RawMessage
+			if err := decoder.Decode(&raw); err != nil {
+				log.Printf("Decode error: %v", err)
+				continue
+			}
+
+			resp, err := s.HandleRequest(ctx, raw)
+			if err != nil {
+				log.Printf("Handle error: %v", err)
+				continue
+			}
+
+			if err := encoder.Encode(resp); err != nil {
+				log.Printf("Encode error: %v", err)
+			}
+		}
+	}
+}
+
+var idCounter = 0
+
+func generateID(prefix string) string {
+	idCounter++
+	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), idCounter)
+}
