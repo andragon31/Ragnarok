@@ -144,11 +144,11 @@ Write-Success "Repository cloned"
 Write-Step "4. Building binaries"
 
 $PLUGINS = @(
-    @{Name="fenrir"; Path=".\fenrir\cmd\fenrir"},
-    @{Name="hati"; Path=".\hati\cmd\hati"},
-    @{Name="skoll"; Path=".\skoll\cmd\skoll"},
-    @{Name="tyr"; Path=".\tyr\cmd\tyr"},
-    @{Name="rag"; Path=".\installer\cmd\rag"}
+    @{Name="fenrir"; Dir="fenrir"; Package="./cmd/fenrir"},
+    @{Name="hati"; Dir="hati"; Package="./cmd/hati"},
+    @{Name="skoll"; Dir="skoll"; Package="./cmd/skoll"},
+    @{Name="tyr"; Dir="tyr"; Package="./cmd/tyr"},
+    @{Name="rag"; Dir="installer"; Package="./cmd/rag"}
 )
 
 $buildSuccess = $true
@@ -158,7 +158,7 @@ foreach ($plugin in $PLUGINS) {
     Write-Host "  Building $($plugin.Name)..." -NoNewline
     
     Push-Location $TEMP_DIR
-    $buildArgs = @("build", "-ldflags=-s -w", "-o", $outFile, $plugin.Path)
+    $buildArgs = @("build", "-C", $plugin.Dir, "-ldflags=-s -w", "-o", $outFile, $plugin.Package)
     $buildOutput = & go @buildArgs 2>&1
     Pop-Location
     
