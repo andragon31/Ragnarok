@@ -1,4 +1,4 @@
-# Ragnarok Ecosystem v1.1.0
+# Ragnarok Ecosystem v1.1.1
 
 **Memory, Knowledge & Institutional Intelligence for AI Agents**
 

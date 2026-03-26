@@ -16,7 +16,7 @@ import (
 	"github.com/ragnarok-ecosystem/installer/internal/integration"
 )
 
-var version = "1.1.0"
+var version = "1.1.1"
 
 type Plugin struct {
 	Name    string
@@ -479,7 +479,7 @@ func runIntegrate(projectPath string) {
 }
 
 func printUsage() {
-	fmt.Println(`Ragnarok v1.1.0 - AI Governance & Memory Layer
+	fmt.Println(`Ragnarok v1.1.1 - AI Governance & Memory Layer
 
 Usage:
   rag init --project NAME [--dir DIR]     Initialize all plugins
