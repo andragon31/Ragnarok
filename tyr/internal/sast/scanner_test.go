@@ -24,12 +24,12 @@ func TestScanner_ScanFile_HardcodedSecret(t *testing.T) {
 		},
 		{
 			name:     "AWS access key detected",
-			content:  `awsAccessKey := "AKIAIOSFODNN7EXAMPLE"`,
+			content:  `awsAccessKey := "AKIAXXXXXXXXXXXXXXXX"`,
 			expected: 1,
 		},
 		{
 			name:     "Bearer token detected",
-			content:  `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9`,
+			content:  `Authorization: Bearer eyJhbGcOiJIUzI1NiIsInR5cCI6IkpXVCJ9`,
 			expected: 1,
 		},
 		{
@@ -373,7 +373,7 @@ func BenchmarkScanFile(b *testing.B) {
 	import "fmt"
 	
 	func main() {
-		apiKey := "TEST_KEY_PLACEHOLDER_12345"
+		apiKey := "YOUR_API_KEY_HERE"
 		password := "mysecretpassword"
 		fmt.Println("Hello")
 	}
