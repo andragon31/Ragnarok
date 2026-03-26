@@ -54,16 +54,22 @@ function New-Directory($path) {
 }
 
 Write-Host @"
-                                    _
-     _  _   _ ___ ___    _ _____ _  _ ___ _  _ ___    _   _ _____
-    | \| | | | __| _ \  / \_   _| || | __| \| |   \  | | | |_   _|
-    | .` | |_| _||   / / _ \| | | __ | _|| .` | |) | | |_| | | |
-    |_|\_|____|___|_|_\___/|_| |_||_|___|_|\_|___/   \___/  |_|
-                                                                            v$VERSION
-    ──────────────────────────────────────────────────────────────────────────────
-     AI Governance & Memory Layer Ecosystem
+
+    ==================================================================
+    ==================================================================
+    ||                                                            ||
+    ||   RRRRRRR   AAA    GGGGG  N   N  OOOOO  RRRRRRR   OOOOO   ||
+    ||   R      R A   A  G       NN  N  O   O  R      R O     O  ||
+    ||   RRRRRRR  AAAAA  G  GGG  N N N  O   O  RRRRRRR  O     O  ||
+    ||   R      R A   A  G    G  N  NN  O   O  R      R O     O  ||
+    ||   RRRRRRR  A   A  GGGGG   N   N  OOOOO  RRRRRRR   OOOOO   ||
+    ||                                                            ||
+    ==================================================================
+    ==================================================================
+
+     v$VERSION - AI Governance & Memory Layer Ecosystem
      https://github.com/andragon31/Ragnarok
-    ──────────────────────────────────────────────────────────────────────────────
+
 "@ -ForegroundColor Cyan
 
 Write-Host "`nInstalling Ragnarok v$VERSION..." -ForegroundColor White
