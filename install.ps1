@@ -1,7 +1,6 @@
 # Ragnarok Installer v1.1.0
 # AI Governance & Memory Layer Ecosystem
-# Usage: irm https://raw.githubusercontent.com/ragnarok-ecosystem/ragnarok/main/install.ps1 | iex
-# Or:    irm https://tinyurl.com/ragnarok-install | iex
+# Usage: irm https://raw.githubusercontent.com/andragon31/Ragnarok/v1.1.0/install.ps1 | iex
 
 param(
     [string]$ProjectName = "ragnarok",
@@ -13,8 +12,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $VERSION = "1.1.0"
-$REPO_URL = "https://github.com/ragnarok-ecosystem/ragnarok"
-$BINARIES_URL = "https://github.com/ragnarok-ecosystem/ragnarok/releases/download/v$VERSION"
+$REPO_URL = "https://github.com/andragon31/Ragnarok"
+$BINARIES_URL = "https://github.com/andragon31/Ragnarok/releases/download/v$VERSION"
 
 function Write-Step($message) {
     $colors = @{ForegroundColor = "Cyan"; BackgroundColor = "Black"}
@@ -54,18 +53,16 @@ function Expand-Zip($zipPath, $dest) {
 }
 
 Write-Host @"
-╔═══════════════════════════════════════════════════════════════╗
-║                                                               ║
-║   ██████╗  ██████╗ ██╗     ██╗     ███████╗                   ║
-║   ██╔══██╗██╔═══██╗██║     ██║     ██╔════╝                   ║
-║   ██████╔╝██║   ██║██║     ██║     ███████╗                   ║
-║   ██╔══██╗██║   ██║██║     ██║     ╚════██║                   ║
-║   ██║  ██║╚██████╔╝███████╗███████╗███████║                   ║
-║   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝╚══════╝                   ║
-║                                                               ║
-║   AI Governance & Memory Layer Ecosystem v$VERSION              ║
-║   https://github.com/ragnarok-ecosystem/ragnarok               ║
-╚═══════════════════════════════════════════════════════════════╝
+                                    `
+     _  _   _ ___ ___    _ _____ _  _ ___ _  _ ___    _   _ _____
+    | \| | | | __| _ \  / \_   _| || | __| \| |   \  | | | |_   _|
+    | .` | |_| _||   / / _ \| | | __ | _|| .` | |) | | |_| | | |
+    |_|\_|____|___|_|_\___/|_| |_||_|___|_|\_|___/   \___/  |_|
+                                                                            v$VERSION
+    ──────────────────────────────────────────────────────────────────────────────
+     AI Governance & Memory Layer Ecosystem
+     https://github.com/andragon31/Ragnarok
+    ──────────────────────────────────────────────────────────────────────────────
 "@ -ForegroundColor Cyan
 
 Write-Host "`nInstalling Ragnarok v$VERSION..." -ForegroundColor White
