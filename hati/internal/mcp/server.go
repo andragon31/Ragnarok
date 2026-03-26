@@ -65,11 +65,21 @@ func (s *Server) registerHandlers() {
 	s.handlers["plan_restart"] = s.handlePlanRestart
 	s.handlers["plan_resume"] = s.handlePlanResume
 	s.handlers["plan_blockers"] = s.handlePlanBlockers
+	s.handlers["plan_recover"] = s.handlePlanRecover
+	s.handlers["plan_dependencies"] = s.handlePlanDependencies
+	s.handlers["plan_lock"] = s.handlePlanLock
+	s.handlers["plan_unlock"] = s.handlePlanUnlock
+	s.handlers["agent_register_work"] = s.handleAgentRegisterWork
+	s.handlers["agent_unregister_work"] = s.handleAgentUnregisterWork
+	s.handlers["agent_list_work"] = s.handleAgentListWork
 
 	s.handlers["checkpoint_open"] = s.handleCheckpointOpen
 	s.handlers["checkpoint_decide"] = s.handleCheckpointDecide
 	s.handlers["checkpoint_status"] = s.handleCheckpointStatus
 	s.handlers["checkpoint_approve"] = s.handleCheckpointApprove
+	s.handlers["checkpoint_set_sla"] = s.handleCheckpointSetSLA
+	s.handlers["checkpoint_escalate"] = s.handleCheckpointEscalate
+	s.handlers["checkpoint_check_sla"] = s.handleCheckpointCheckSLA
 
 	s.handlers["phase_start"] = s.handlePhaseStart
 	s.handlers["phase_report"] = s.handlePhaseReport
@@ -77,6 +87,10 @@ func (s *Server) registerHandlers() {
 	s.handlers["feedback_request"] = s.handleFeedbackRequest
 	s.handlers["feedback_receive"] = s.handleFeedbackReceive
 	s.handlers["feedback_escalate"] = s.handleFeedbackEscalate
+
+	s.handlers["notification_send"] = s.handleNotificationSend
+	s.handlers["notification_list"] = s.handleNotificationList
+	s.handlers["notification_ack"] = s.handleNotificationAck
 
 	s.handlers["record_list"] = s.handleRecordList
 	s.handlers["record_get"] = s.handleRecordGet

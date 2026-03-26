@@ -352,6 +352,451 @@ Sin Hati, el agente actúa sin estructura ni supervisión. Con Hati, cada featur
 
 ---
 
+### 3.2.1 Flujo de Corrección Humana (Human-in-the-Loop)
+
+El ecosistema Ragnarok contempla el escenario donde el usuario debe corregir al agente durante la ejecución de un plan. Este flujo garantiza supervisión y control continuo.
+
+#### Diagrama del Flujo
+
+```mermaid
+flowchart TB
+    subgraph Execution["🚀 EJECUCIÓN DEL PLAN"]
+        A1["plan_create"]
+        A2["phase_start"]
+        A3["checkpoint_open"]
+        A4["Implementación"]
+    end
+
+    subgraph UserFeedback["👤 FEEDBACK DEL USUARIO"]
+        B1["feedback_receive"]
+        B2{¿Es rechazo?"}
+        B3["Detectar patrón"]
+    end
+
+    subgraph Detection["🔍 DETECCIÓN AUTOMÁTICA"]
+        C1["isRejectionFeedback()"]
+        C2["Frases en español"]
+        C3["Frases en inglés"]
+    end
+
+    subgraph Revision["📋 REVISIÓN"]
+        D1["plan.status = needs_revision"]
+        D2["execution_blocker creado"]
+        D3["plan_revise()"]
+    end
+
+    subgraph Recovery["▶️ RECUPERACIÓN"]
+        E1["checkpoint_approve()"]
+        E2["plan_restart()"]
+        E3["plan_resume()"]
+    end
+
+    A1 --> A2 --> A3 --> A4
+    A4 -->|"No está bien"| B1
+    B1 --> B2
+    B2 -->|Sí| C1
+    C1 --> C2
+    C1 --> C3
+    C2 --> D1
+    C3 --> D1
+    D1 --> D2
+    D2 --> D3
+    D3 --> E1
+    E1 --> E2
+    E2 --> E3
+    E3 -->|"Continuar"| A2
+```
+
+#### Detección Automática de Rechazos
+
+El sistema detecta rechazos mediante frases predefinidas en español e inglés:
+
+| Idioma | Frases detectadas |
+|--------|-------------------|
+| **Español** | `no es correcto`, `esto no`, `espera`, `rechazo`, `no estoy de acuerdo`, `revisa esto` |
+| **Inglés** | `not correct`, `reject`, `wrong`, `hold on`, `wait`, `should not`, `please stop` |
+
+#### Tablas de Tracking
+
+- **`execution_blockers`** — Registra bloqueos activos que evitan la continuación del plan
+- **`plan_revisions`** — Historial de cambios realizados durante correcciones
+
+#### Handlers del Flujo
+
+| Handler | Descripción |
+|---------|-------------|
+| `feedback_receive` | Recibe feedback del usuario, detecta si es rechazo y dispara revisión si es necesario |
+| `plan_revise` | Modifica el plan: actualiza título, descripción, añade/elimina fases |
+| `plan_restart` | Reinicia el plan desde una fase específica |
+| `plan_resume` | Continúa el plan después de resolver bloqueos |
+| `plan_blockers` | Lista todos los bloqueos activos de un plan |
+| `checkpoint_approve` | Aprueba un checkpoint para continuar la ejecución |
+
+#### Ejemplo de Uso
+
+```json
+// 1. Usuario rechaza: "Esto no es correcto"
+{
+  "method": "feedback_receive",
+  "params": {
+    "feedback_id": "fb_123",
+    "content": "Esto no es correcto, el enfoque no es el adecuado",
+    "author": "developer"
+  }
+}
+
+// Respuesta automática:
+{
+  "result": {
+    "is_rejection": true,
+    "action_triggered": "plan_revise",
+    "plan_id": "plan_abc123",
+    "message": "Rejection detected. Plan marked for revision."
+  }
+}
+
+// 2. Revisar el plan
+{
+  "method": "plan_revise",
+  "params": {
+    "plan_id": "plan_abc123",
+    "title": "Implementar Auth - revised",
+    "new_phases": ["research", "implementation", "testing"],
+    "notes": "Usuario pidió enfoque diferente"
+  }
+}
+
+// 3. Aprobar y continuar
+{
+  "method": "checkpoint_approve",
+  "params": {
+    "checkpoint_id": "cp_456",
+    "approver": "developer",
+    "notes": "Cambios aceptados"
+  }
+}
+
+// 4. Reiniciar desde fase 1
+{
+  "method": "plan_restart",
+  "params": {
+    "plan_id": "plan_abc123",
+    "from_phase": 1
+  }
+}
+```
+
+#### Estados del Plan
+
+```
+draft → active → needs_revision → active → completed
+              ↓
+           abandoned
+```
+
+---
+
+### 3.2.2 Escenarios Contemplados en el Ecosistema
+
+El ecosistema Ragnarok está diseñado para contemplar todos los escenarios que pueden ocurrir cuando un usuario escribe al agente AI y este utiliza las herramientas del ecosistema.
+
+#### Lista Completa de Escenarios
+
+| # | Escenario | Plugin | Handlers Involucrados | Estado |
+|---|-----------|--------|------------------------|--------|
+| 1 | **Usuario crea un plan para nueva feature** | Hati | `plan_create` → `phase_start` → `checkpoint_open` | ✅ Implementado |
+| 2 | **Usuario pide approval en checkpoint** | Hati | `checkpoint_decide` (approved/rejected) | ✅ Implementado |
+| 3 | **Usuario rechaza implementación (corrección humana)** | Hati | `feedback_receive` → detecta rechazo → `plan.status = needs_revision` | ✅ Implementado |
+| 4 | **Usuario revisa y modifica plan después de rechazo** | Hati | `plan_revise` (title, phases, description) | ✅ Implementado |
+| 5 | **Usuario reinicia plan después de corrección** | Hati | `plan_restart`, `plan_resume` | ✅ Implementado |
+| 6 | **Agente necesita approval antes de proceder** | Hati | `checkpoint_open` (tipo: pre, mid, post) | ✅ Implementado |
+| 7 | **Usuario quiere ver bloqueos activos del plan** | Hati | `plan_blockers` lista execution_blockers | ✅ Implementado |
+| 8 | **Sistema detecta agente caído/crash** | Hati | `plan_recover` detecta estado inconsistente | ✅ Implementado |
+| 9 | **Usuario configura dependencia entre planes** | Hati | `plan_dependencies` (Plan B depende de Plan A) | ✅ Implementado |
+| 10 | **Checkpoint pendiente por mucho tiempo** | Hati | `notification_send` con webhook para notificar | ✅ Implementado |
+| 11 | **Usuario recibe notificación de approval pendiente** | Hati | `notification_list`, `notification_ack` | ✅ Implementado |
+| 12 | **Agente guarda contexto de sesión** | Fenrir | `mem_session_start` → `mem_save` | ✅ Implementado |
+| 13 | **Agente busca conocimiento del proyecto** | Fenrir | `mem_find` (FTS5), `spec_list` | ✅ Implementado |
+| 14 | **Agente crea/specif down nueva feature** | Fenrir | `spec_save` (formato GIVEN/WHEN/THEN) | ✅ Implementado |
+| 15 | **Agente verifica implementación contra spec** | Fenrir | `spec_check` compara código con spec | ✅ Implementado |
+| 16 | **Agente detecta sesgo en su razonamiento** | Fenrir | `bias_report` | ✅ Implementado |
+| 17 | **Agente guarda intención antes de actuar** | Fenrir | `intent_save` | ✅ Implementado |
+| 18 | **Agente necesita skills para tarea** | Skoll | `skill_list` (progressive disclosure), `skill_load` | ✅ Implementado |
+| 19 | **Agente busca skill específica** | Skoll | `skill_search` por nombre/descripcion | ✅ Implementado |
+| 20 | **Agente importa skill desde GitHub** | Skoll | `skills_import` (github, skillsmp) | ✅ Implementado |
+| 21 | **Agente verifica si viola reglas** | Skoll | `rule_check` | ✅ Implementado |
+| 22 | **Agente activa contexto de agente** | Skoll | `agent_activate` → allowed_tools | ✅ Implementado |
+| 23 | **Agente transfiere trabajo a otro agente** | Skoll | `agent_handoff` con contrato | ✅ Implementado |
+| 24 | **Agente inicia workflow definido** | Skoll | `workflow_start` → `workflow_step` | ✅ Implementado |
+| 25 | **Agente verifica Definition of Done** | Skoll | `dod_check` | ✅ Implementado |
+| 26 | **Agente valida código antes de commit** | Tyr | `precommit_validate` | ✅ Implementado |
+| 27 | **Agente checkea package antes de instalar** | Tyr | `pkg_check` (npm, PyPI, crates, NuGet) | ✅ Implementado |
+| 28 | **Agente detecta CVE en dependencies** | Tyr | `pkg_audit` → `CheckGitHubAdvisories` API | ✅ Implementado |
+| 29 | **Agente ejecuta scan de seguridad (SAST)** | Tyr | `sast_run` (14 reglas built-in) | ✅ Implementado |
+| 30 | **Agente detecta secrets hardcoded** | Tyr | `sast_run` → rule `hardcoded-secret` | ✅ Implementado |
+| 31 | **Agente detecta SQL injection** | Tyr | `sast_run` → rule `sql-injection` | ✅ Implementado |
+| 32 | **Agente detecta prompt injection** | Tyr | `inject_guard` | ✅ Implementado |
+| 33 | **Agente sanitiza contenido sensible** | Tyr | `sanitize` (API keys, passwords, emails) | ✅ Implementado |
+| 34 | **Agente ejecuta standards de calidad** | Tyr | `standard_run`, `standard_run_all` | ✅ Implementado |
+| 35 | **Agente escanea proyecto para bootstrap** | Fenrir | `project_scan` (20+ frameworks) | ✅ Implementado |
+| 36 | **Agente genera .ragnarok/ con skills/rules** | Fenrir | `project_bootstrap` | ✅ Implementado |
+| 37 | **Agente lee AGENTS.md del proyecto** | Fenrir | `agents_md_get` | ✅ Implementado |
+| 38 | **Usuario quiere hacer rollback de plan** | Hati | `plan_abandon` + `plan_restart` | ✅ Implementado |
+| 39 | **Múltiples agentes trabajan en paralelo** | Hati | `plan_lock`, `plan_unlock`, `agent_register_work`, `agent_list_work` | ✅ Implementado |
+| 40 | **Plan necesita time-based escalation** | Hati | `checkpoint_set_sla`, `checkpoint_check_sla`, `checkpoint_escalate` | ✅ Implementado |
+
+#### Flujo de Escenarios Comunes
+
+##### Escenario 1: Feature Development Completo
+
+```
+Usuario: "Implementa autenticación OAuth2"
+    ↓
+Agente → Fenrir: intent_save(plan, prompt)
+Agente → Hati: plan_create(title="OAuth2 Auth")
+Agente → Hati: checkpoint_open(type="pre") → Notifica usuario
+Usuario → Hati: checkpoint_decide(approved)
+Agente → Skoll: skill_load("oauth2-implementation")
+Agente → Tyr: sast_run(archivos)
+Agente → Fenrir: spec_save(GIVEN/WHEN/THEN)
+Agente → Hati: phase_complete
+Agente → Hati: checkpoint_open(type="post")
+Usuario → Hati: checkpoint_decide(approved)
+Agente → Hati: plan_complete
+```
+
+##### Escenario 2: Corrección Humana
+
+```
+Agente: Implementando feature...
+    ↓
+Usuario: "Esto no está bien, el enfoque es incorrecto"
+    ↓
+Agente → Hati: feedback_receive(content="no está bien")
+    ↓
+Hati detecta rechazo → plan.status = "needs_revision"
+Hati crea execution_blocker
+    ↓
+Agente → Hati: plan_revise(new_phases=["research", "impl", "test"])
+    ↓
+Usuario: "Ahora sí, continúa"
+Usuario → Hati: checkpoint_approve
+    ↓
+Agente → Hati: plan_restart(from_phase=1)
+```
+
+##### Escenario 3: Recovery de Agente Caído
+
+```
+Agente trabajando en phase 2 de 5...
+    ↓
+[SESIÓN CAÍDA / AGENTE CRASH]
+    ↓
+Nuevo agente o usuario:
+    ↓
+Agente → Hati: plan_recover(plan_id, modified_files=[...])
+    ↓
+Hati detecta: phase="in_progress" pero no agent_id
+→ recovery_needed: true
+→ suggested_actions: ["plan_restart --from-phase 2"]
+    ↓
+Usuario decide: restart o abandon
+```
+
+##### Escenario 4: Dependencias Entre Planes
+
+```
+Plan A: "Implementar API de usuarios" (en progreso)
+Plan B: "UI de dashboard" (depende de Plan A)
+    ↓
+Agente → Hati: plan_dependencies(plan_id=B, depends_on=A)
+    ↓
+Plan B queda bloqueado hasta que Plan A complete
+    ↓
+Plan A → Hati: plan_complete
+    ↓
+Hati desbloquea Plan B
+```
+
+##### Escenario 5: Notificación de Approval Pendiente
+
+```
+Agente → Hati: checkpoint_open(type="pre", plan_id="auth-123")
+    ↓
+Hati → notification_send(
+    recipient="tech-lead@company.com",
+    type="checkpoint_pending",
+    webhook="https://slack.webhook/...",
+    title="Approval requerido: OAuth2"
+)
+    ↓
+Usuario recibe Slack/Email
+    ↓
+Usuario → Hati: notification_ack(notification_id)
+Usuario → Hati: checkpoint_decide(approved)
+```
+
+##### Escenario 6: Multi-Agente (Coordinación de Paralelismo)
+
+```
+Agente A → Hati: agent_register_work(agent_id="A", plan_id="auth", phase_id="impl")
+    ↓
+Hati crea lock: plan_id=auth, phase_id=impl, agent_id=A
+    ↓
+Agente B → Hati: agent_register_work(agent_id="B", plan_id="auth", phase_id="impl")
+    ↓
+Hati detecta lock existente por Agente A
+→ Retorna error: "plan is locked by agent A"
+    ↓
+Agente B puede:
+  - Esperar (poll con agent_list_work)
+  - Pedir lock con plan_lock(force=true)
+  - Tomar otra fase con plan_lock(phase_id="testing")
+    ↓
+Agente A → Hati: agent_unregister_work(agent_id="A")
+    ↓
+Lock liberado → Agente B puede continuar
+```
+
+##### Escenario 7: Time-Based Escalation (SLA)
+
+```
+Agente → Hati: checkpoint_open(type="pre", plan_id="auth-123")
+    ↓
+Agente → Hati: checkpoint_set_sla(checkpoint_id="cp_123", sla_hours=4, escalation_recipients="lead@company.com")
+    ↓
+[4 horas pasan sin decisión del usuario]
+    ↓
+Hati: checkpoint_check_sla() → detecta SLA expirado
+    ↓
+Hati → checkpoint_escalate(checkpoint_id="cp_123", reason="SLA expired")
+    ↓
+Hati → webhook notify escalation_recipients
+    ↓
+[Si aún no hay decisión en 2 horas más]
+    ↓
+Hati → escalation_level++ → notifica a下一个 responsable
+```
+
+---
+
+### 3.2.3 Handlers para Escenarios 39 y 40
+
+#### Multi-Agente Coordination (Escenario 39)
+
+| Handler | Descripción |
+|---------|-------------|
+| `plan_lock` | Adquiere lock en plan/fase para evitar conflictos entre agentes |
+| `plan_unlock` | Libera lock adquirido |
+| `agent_register_work` | Registra que agente está trabajando activamente |
+| `agent_unregister_work` | Marca trabajo como completado |
+| `agent_list_work` | Lista trabajos activos de agentes |
+
+#### Time-Based Escalation (Escenario 40)
+
+| Handler | Descripción |
+|---------|-------------|
+| `checkpoint_set_sla` | Define SLA en horas para checkpoint y recipients de escalation |
+| `checkpoint_check_sla` | Revisa checkpoints con SLA expirado |
+| `checkpoint_escalate` | Fuerza escalation manual de checkpoint |
+
+#### Ejemplo: Lock entre Agentes
+
+```json
+// Agente A adquiere lock
+{
+  "method": "plan_lock",
+  "params": {
+    "plan_id": "plan_auth_123",
+    "phase_id": "phase_impl_1",
+    "agent_id": "agent_A",
+    "expires_in_minutes": 30
+  }
+}
+
+// Respuesta
+{
+  "result": {
+    "lock_id": "lock_abc",
+    "plan_id": "plan_auth_123",
+    "phase_id": "phase_impl_1",
+    "locked": true,
+    "expires_at": "2026-03-26T15:30:00Z"
+  }
+}
+
+// Agente B intenta lock mismo plan
+{
+  "method": "plan_lock",
+  "params": {
+    "plan_id": "plan_auth_123",
+    "agent_id": "agent_B"
+  }
+}
+
+// Respuesta: error - plan is locked by agent A
+```
+
+#### Ejemplo: SLA y Escalation
+
+```json
+// Definir SLA de 4 horas
+{
+  "method": "checkpoint_set_sla",
+  "params": {
+    "checkpoint_id": "cp_pending_123",
+    "sla_hours": 4,
+    "escalation_recipients": "tech-lead@company.com,manager@company.com"
+  }
+}
+
+// Respuesta
+{
+  "result": {
+    "sla_id": "sla_xyz",
+    "checkpoint_id": "cp_pending_123",
+    "sla_hours": 4,
+    "expires_at": "2026-03-26T18:00:00Z"
+  }
+}
+
+// Verificar SLAs expirados (puede correr como cron job)
+{
+  "method": "checkpoint_check_sla",
+  "params": {}
+}
+
+// Respuesta
+{
+  "result": {
+    "expired_checkpoints": [
+      {
+        "sla_id": "sla_xyz",
+        "checkpoint_id": "cp_pending_123",
+        "sla_hours": 4,
+        "expires_at": "2026-03-26T18:00:00Z",
+        "overdue_hours": 2,
+        "type": "pre",
+        "plan_id": "plan_auth_123"
+      }
+    ],
+    "count": 1,
+    "checked_at": "2026-03-26T20:00:00Z"
+  }
+}
+
+// Forzar escalation
+{
+  "method": "checkpoint_escalate",
+  "params": {
+    "checkpoint_id": "cp_pending_123",
+    "reason": "SLA exceeded by 2 hours"
+  }
+}
+```
+
+---
+
 ### 3.3 Skoll (Skills & Rules)
 
 **¿Qué hace?**
@@ -1225,17 +1670,20 @@ sequenceDiagram
 | **Scanner** | `prompt_analyze`, `project_scan`, `project_bootstrap`, `agents_md_get` |
 | **Knowledge** | `knowledge_query`, `knowledge_add` |
 
-### 7.2 Hati Tools (22)
+### 7.2 Hati Tools (42)
 
 | Category | Tools |
 |----------|-------|
-| **Plans** | `plan_create`, `plan_get`, `plan_update`, `plan_list` |
-| **Phases** | `phase_add`, `phase_list`, `phase_complete` |
-| **Checkpoints** | `checkpoint_open`, `checkpoint_decide`, `checkpoint_status` |
+| **Plans** | `plan_create`, `plan_get`, `plan_update`, `plan_list`, `plan_revise`, `plan_abandon`, `plan_complete`, `plan_restart`, `plan_resume`, `plan_blockers`, `plan_recover`, `plan_dependencies`, `plan_lock`, `plan_unlock` |
+| **Phases** | `phase_add`, `phase_list`, `phase_complete`, `phase_start`, `phase_report` |
+| **Checkpoints** | `checkpoint_open`, `checkpoint_decide`, `checkpoint_status`, `checkpoint_approve`, `checkpoint_set_sla`, `checkpoint_escalate`, `checkpoint_check_sla` |
+| **Agents** | `agent_register_work`, `agent_unregister_work`, `agent_list_work` |
 | **Decisions** | `decision_record`, `decision_get`, `decision_list`, `decision_cancel` |
-| **Quality** | `quality_snapshot`, `spec_impact`, `spec_status` |
-| **Feedback** | `feedback_save`, `feedback_list` |
-| **Status** | `hati_status`, `hati_stats` |
+| **Quality** | `quality_snapshot`, `spec_impact`, `spec_status`, `plan_completeness`, `plan_quality` |
+| **Feedback** | `feedback_save`, `feedback_list`, `feedback_receive`, `feedback_escalate` |
+| **Notifications** | `notification_send`, `notification_list`, `notification_ack` |
+| **Records** | `record_list`, `record_get`, `record_export` |
+| **Status** | `hati_status`, `hati_stats`, `hati_commit_info`, `hati_register_commit` |
 
 ### 7.3 Skoll Tools (28)
 

@@ -373,7 +373,7 @@ func BenchmarkScanFile(b *testing.B) {
 	import "fmt"
 	
 	func main() {
-		apiKey := "sk_live_abcdefghijklmnopqrstuvwxyz"
+		apiKey := "TEST_KEY_PLACEHOLDER_12345"
 		password := "mysecretpassword"
 		fmt.Println("Hello")
 	}

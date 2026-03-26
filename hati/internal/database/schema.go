@@ -138,6 +138,84 @@ func InitSchema(db *sql.DB) error {
 		FOREIGN KEY (checkpoint_id) REFERENCES checkpoints(id)
 	);
 
+	CREATE TABLE IF NOT EXISTS notifications (
+		id TEXT PRIMARY KEY,
+		recipient TEXT NOT NULL,
+		type TEXT NOT NULL,
+		priority TEXT DEFAULT 'normal',
+		title TEXT NOT NULL,
+		message TEXT NOT NULL,
+		plan_id TEXT,
+		checkpoint_id TEXT,
+		webhook_url TEXT,
+		status TEXT DEFAULT 'pending',
+		sent_at DATETIME,
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (plan_id) REFERENCES plans(id),
+		FOREIGN KEY (checkpoint_id) REFERENCES checkpoints(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS plan_dependencies (
+		id TEXT PRIMARY KEY,
+		plan_id TEXT NOT NULL,
+		depends_on_plan_id TEXT NOT NULL,
+		dependency_type TEXT DEFAULT 'blocking',
+		status TEXT DEFAULT 'pending',
+		FOREIGN KEY (plan_id) REFERENCES plans(id),
+		FOREIGN KEY (depends_on_plan_id) REFERENCES plans(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS plan_recovery (
+		id TEXT PRIMARY KEY,
+		plan_id TEXT NOT NULL,
+		phase_id TEXT,
+		agent_id TEXT,
+		detected_state TEXT NOT NULL,
+		expected_state TEXT NOT NULL,
+		modified_files TEXT,
+		recovery_needed INTEGER DEFAULT 0,
+		resolved_at DATETIME,
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (plan_id) REFERENCES plans(id),
+		FOREIGN KEY (phase_id) REFERENCES phases(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS agent_locks (
+		id TEXT PRIMARY KEY,
+		plan_id TEXT NOT NULL,
+		phase_id TEXT,
+		agent_id TEXT NOT NULL,
+		locked_at DATETIME NOT NULL,
+		expires_at DATETIME,
+		FOREIGN KEY (plan_id) REFERENCES plans(id),
+		FOREIGN KEY (phase_id) REFERENCES phases(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS agent_work (
+		id TEXT PRIMARY KEY,
+		agent_id TEXT NOT NULL,
+		agent_name TEXT,
+		plan_id TEXT NOT NULL,
+		phase_id TEXT,
+		status TEXT DEFAULT 'active',
+		started_at DATETIME NOT NULL,
+		heartbeat_at DATETIME,
+		FOREIGN KEY (plan_id) REFERENCES plans(id),
+		FOREIGN KEY (phase_id) REFERENCES phases(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS checkpoint_sla (
+		id TEXT PRIMARY KEY,
+		checkpoint_id TEXT NOT NULL,
+		sla_hours INTEGER NOT NULL,
+		escalation_level INTEGER DEFAULT 1,
+		escalation_recipients TEXT,
+		created_at DATETIME NOT NULL,
+		expires_at DATETIME,
+		escalated_at DATETIME,
+		FOREIGN KEY (checkpoint_id) REFERENCES checkpoints(id)
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_plans_session ON plans(session_id);
 	CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
 	CREATE INDEX IF NOT EXISTS idx_phases_plan ON phases(plan_id);
@@ -145,6 +223,13 @@ func InitSchema(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_checkpoints_type ON checkpoints(type);
 	CREATE INDEX IF NOT EXISTS idx_plan_revisions_plan ON plan_revisions(plan_id);
 	CREATE INDEX IF NOT EXISTS idx_execution_blockers_plan ON execution_blockers(plan_id);
+	CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
+	CREATE INDEX IF NOT EXISTS idx_notifications_plan ON notifications(plan_id);
+	CREATE INDEX IF NOT EXISTS idx_plan_dependencies_plan ON plan_dependencies(plan_id);
+	CREATE INDEX IF NOT EXISTS idx_plan_recovery_plan ON plan_recovery(plan_id);
+	CREATE INDEX IF NOT EXISTS idx_agent_locks_plan ON agent_locks(plan_id);
+	CREATE INDEX IF NOT EXISTS idx_agent_work_plan ON agent_work(plan_id);
+	CREATE INDEX IF NOT EXISTS idx_checkpoint_sla_expires ON checkpoint_sla(expires_at);
 	`
 
 	_, err := db.Exec(schema)

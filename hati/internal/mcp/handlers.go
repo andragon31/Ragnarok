@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -1143,9 +1144,713 @@ func (s *Server) handleHatiRegisterCommit(ctx context.Context, req *Request) (*R
 	}, nil
 }
 
+func (s *Server) handleNotificationSend(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		Recipient    string `json:"recipient"`
+		Type         string `json:"type"`
+		Priority     string `json:"priority,omitempty"`
+		Title        string `json:"title"`
+		Message      string `json:"message"`
+		PlanID       string `json:"plan_id,omitempty"`
+		CheckpointID string `json:"checkpoint_id,omitempty"`
+		WebhookURL   string `json:"webhook_url,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.Recipient == "" || params.Title == "" || params.Message == "" {
+		return nil, fmt.Errorf("recipient, title, and message are required")
+	}
+
+	if params.Type == "" {
+		params.Type = "checkpoint_pending"
+	}
+	if params.Priority == "" {
+		params.Priority = "normal"
+	}
+
+	notifID := generateID("notif")
+	createdAt := time.Now()
+
+	query := `INSERT INTO notifications (id, recipient, type, priority, title, message, plan_id, checkpoint_id, webhook_url, status, created_at) 
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
+	_, err := s.db.Exec(query, notifID, params.Recipient, params.Type, params.Priority, params.Title, params.Message, params.PlanID, params.CheckpointID, params.WebhookURL, createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create notification: %w", err)
+	}
+
+	if params.WebhookURL != "" {
+		go s.sendWebhook(params.WebhookURL, map[string]interface{}{
+			"id":         notifID,
+			"type":       params.Type,
+			"title":      params.Title,
+			"message":    params.Message,
+			"plan_id":    params.PlanID,
+			"priority":   params.Priority,
+			"created_at": createdAt,
+		})
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"id":          notifID,
+			"status":      "sent",
+			"sent_at":     createdAt,
+			"has_webhook": params.WebhookURL != "",
+		},
+	}, nil
+}
+
+func (s *Server) sendWebhook(url string, payload map[string]interface{}) {
+	data, _ := json.Marshal(payload)
+	http.Post(url, "application/json", strings.NewReader(string(data)))
+}
+
+func (s *Server) handleNotificationList(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		Status    string `json:"status,omitempty"`
+		Recipient string `json:"recipient,omitempty"`
+		PlanID    string `json:"plan_id,omitempty"`
+		Limit     int    `json:"limit,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.Limit == 0 {
+		params.Limit = 50
+	}
+
+	query := `SELECT id, recipient, type, priority, title, message, plan_id, checkpoint_id, status, sent_at, created_at 
+	          FROM notifications WHERE 1=1`
+	args := []interface{}{}
+
+	if params.Status != "" {
+		query += " AND status = ?"
+		args = append(args, params.Status)
+	}
+	if params.Recipient != "" {
+		query += " AND recipient = ?"
+		args = append(args, params.Recipient)
+	}
+	if params.PlanID != "" {
+		query += " AND plan_id = ?"
+		args = append(args, params.PlanID)
+	}
+
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, params.Limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list notifications: %w", err)
+	}
+	defer rows.Close()
+
+	var notifications []map[string]interface{}
+	for rows.Next() {
+		var id, recipient, notifType, priority, title, message, planID, cpID string
+		var status string
+		var sentAt, createdAt *time.Time
+		rows.Scan(&id, &recipient, &notifType, &priority, &title, &message, &planID, &cpID, &status, &sentAt, &createdAt)
+
+		n := map[string]interface{}{
+			"id":         id,
+			"recipient":  recipient,
+			"type":       notifType,
+			"priority":   priority,
+			"title":      title,
+			"message":    message,
+			"plan_id":    planID,
+			"status":     status,
+			"created_at": createdAt,
+		}
+		if sentAt != nil {
+			n["sent_at"] = sentAt
+		}
+		notifications = append(notifications, n)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"notifications": notifications,
+			"count":         len(notifications),
+		},
+	}, nil
+}
+
+func (s *Server) handleNotificationAck(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		NotificationID string `json:"notification_id"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	now := time.Now()
+	query := `UPDATE notifications SET status = 'acknowledged', sent_at = ? WHERE id = ?`
+	_, err := s.db.Exec(query, now, params.NotificationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acknowledge notification: %w", err)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"id":              params.NotificationID,
+			"status":          "acknowledged",
+			"acknowledged_at": now,
+		},
+	}, nil
+}
+
+func (s *Server) handlePlanDependencies(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		PlanID          string `json:"plan_id"`
+		DependsOnPlanID string `json:"depends_on_plan_id,omitempty"`
+		DependencyType  string `json:"dependency_type,omitempty"`
+		Action          string `json:"action,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.PlanID == "" {
+		return nil, fmt.Errorf("plan_id is required")
+	}
+
+	if params.Action == "list" {
+		query := `SELECT pd.id, pd.plan_id, pd.depends_on_plan_id, pd.dependency_type, pd.status,
+		                 p.title as dependent_title
+		          FROM plan_dependencies pd
+		          JOIN plans p ON pd.depends_on_plan_id = p.id
+		          WHERE pd.plan_id = ?`
+		rows, err := s.db.Query(query, params.PlanID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list dependencies: %w", err)
+		}
+		defer rows.Close()
+
+		var deps []map[string]interface{}
+		for rows.Next() {
+			var id, planID, dependsOn, depType, status, depTitle string
+			rows.Scan(&id, &planID, &dependsOn, &depType, &status, &depTitle)
+			deps = append(deps, map[string]interface{}{
+				"id":               id,
+				"plan_id":          planID,
+				"depends_on":       dependsOn,
+				"dependency_type":  depType,
+				"status":           status,
+				"depends_on_title": depTitle,
+			})
+		}
+
+		return &Response{
+			Result: map[string]interface{}{
+				"plan_id":      params.PlanID,
+				"dependencies": deps,
+				"count":        len(deps),
+			},
+		}, nil
+	}
+
+	if params.DependsOnPlanID != "" {
+		if params.DependencyType == "" {
+			params.DependencyType = "blocking"
+		}
+
+		depID := generateID("dep")
+		query := `INSERT INTO plan_dependencies (id, plan_id, depends_on_plan_id, dependency_type, status) VALUES (?, ?, ?, ?, 'pending')`
+		_, err := s.db.Exec(query, depID, params.PlanID, params.DependsOnPlanID, params.DependencyType)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add dependency: %w", err)
+		}
+
+		return &Response{
+			Result: map[string]interface{}{
+				"id":                 depID,
+				"plan_id":            params.PlanID,
+				"depends_on_plan_id": params.DependsOnPlanID,
+				"dependency_type":    params.DependencyType,
+				"status":             "pending",
+			},
+		}, nil
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"plan_id": params.PlanID,
+			"message": "Use action=list to view dependencies or provide depends_on_plan_id to add",
+		},
+	}, nil
+}
+
+func (s *Server) handlePlanRecover(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		PlanID        string   `json:"plan_id"`
+		AgentID       string   `json:"agent_id,omitempty"`
+		ModifiedFiles []string `json:"modified_files,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.PlanID == "" {
+		return nil, fmt.Errorf("plan_id is required")
+	}
+
+	var currentPhase struct {
+		ID       string
+		Name     string
+		Status   string
+		OrderNum int
+	}
+	phaseQuery := `SELECT id, name, status, order_num FROM phases WHERE plan_id = ? AND status = 'in_progress' ORDER BY order_num LIMIT 1`
+	err := s.db.QueryRow(phaseQuery, params.PlanID).Scan(&currentPhase.ID, &currentPhase.Name, &currentPhase.Status, &currentPhase.OrderNum)
+
+	var recoveryState string
+	var recoveryNeeded bool
+
+	if err == sql.ErrNoRows {
+		var planStatus string
+		s.db.QueryRow(`SELECT status FROM plans WHERE id = ?`, params.PlanID).Scan(&planStatus)
+
+		if planStatus == "in_progress" {
+			recoveryState = "agent_disconnected"
+			recoveryNeeded = true
+		} else {
+			recoveryState = "normal"
+			recoveryNeeded = false
+		}
+	} else if err != nil {
+		recoveryState = "error_querying_phase"
+		recoveryNeeded = true
+	} else {
+		if params.AgentID != "" {
+			recoveryState = "agent_active"
+			recoveryNeeded = false
+		} else {
+			recoveryState = "phase_in_progress_no_agent"
+			recoveryNeeded = true
+		}
+	}
+
+	var filesJSON string
+	if len(params.ModifiedFiles) > 0 {
+		filesData, _ := json.Marshal(params.ModifiedFiles)
+		filesJSON = string(filesData)
+	}
+
+	recoveryID := generateID("recovery")
+	createdAt := time.Now()
+
+	insertQuery := `INSERT INTO plan_recovery (id, plan_id, phase_id, agent_id, detected_state, expected_state, modified_files, recovery_needed, created_at) 
+	                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	s.db.Exec(insertQuery, recoveryID, params.PlanID, currentPhase.ID, params.AgentID, recoveryState, "completed", filesJSON, boolToInt(recoveryNeeded), createdAt)
+
+	result := map[string]interface{}{
+		"plan_id":         params.PlanID,
+		"current_phase":   currentPhase.Name,
+		"detected_state":  recoveryState,
+		"recovery_needed": recoveryNeeded,
+		"recovery_id":     recoveryID,
+	}
+
+	if recoveryNeeded {
+		result["suggested_actions"] = []string{
+			"plan_restart --from-phase " + string(rune('0'+currentPhase.OrderNum)),
+			"plan_abandon --plan_id " + params.PlanID + " --reason agent_disconnected",
+		}
+		result["message"] = "Recovery needed. Agent appears disconnected or phase is inconsistent."
+	} else {
+		result["message"] = "Plan appears healthy, no recovery needed."
+	}
+
+	return &Response{Result: result}, nil
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1
 	}
 	return 0
+}
+
+func (s *Server) handlePlanLock(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		PlanID    string `json:"plan_id"`
+		PhaseID   string `json:"phase_id,omitempty"`
+		AgentID   string `json:"agent_id"`
+		ExpiresIn int    `json:"expires_in_minutes,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.PlanID == "" || params.AgentID == "" {
+		return nil, fmt.Errorf("plan_id and agent_id are required")
+	}
+
+	var existingLock struct {
+		AgentID string
+	}
+	lockQuery := `SELECT agent_id FROM agent_locks WHERE plan_id = ? AND (phase_id = ? OR (? = '' AND phase_id IS NULL)) AND expires_at > ?`
+	now := time.Now()
+	err := s.db.QueryRow(lockQuery, params.PlanID, params.PhaseID, params.PhaseID, now).Scan(&existingLock.AgentID)
+
+	if err == nil {
+		if existingLock.AgentID != params.AgentID {
+			return nil, fmt.Errorf("plan is locked by agent %s", existingLock.AgentID)
+		}
+		return &Response{
+			Result: map[string]interface{}{
+				"plan_id":  params.PlanID,
+				"phase_id": params.PhaseID,
+				"locked":   true,
+				"message":  "Lock already held by this agent",
+			},
+		}, nil
+	}
+
+	lockID := generateID("lock")
+	expiresAt := now.Add(time.Duration(params.ExpiresIn) * time.Minute)
+	if params.ExpiresIn <= 0 {
+		expiresAt = now.Add(30 * time.Minute)
+	}
+
+	insertQuery := `INSERT INTO agent_locks (id, plan_id, phase_id, agent_id, locked_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`
+	_, err = s.db.Exec(insertQuery, lockID, params.PlanID, params.PhaseID, params.AgentID, now, expiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire lock: %w", err)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"lock_id":    lockID,
+			"plan_id":    params.PlanID,
+			"phase_id":   params.PhaseID,
+			"agent_id":   params.AgentID,
+			"locked":     true,
+			"expires_at": expiresAt,
+		},
+	}, nil
+}
+
+func (s *Server) handlePlanUnlock(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		PlanID  string `json:"plan_id"`
+		PhaseID string `json:"phase_id,omitempty"`
+		AgentID string `json:"agent_id"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.PlanID == "" || params.AgentID == "" {
+		return nil, fmt.Errorf("plan_id and agent_id are required")
+	}
+
+	query := `DELETE FROM agent_locks WHERE plan_id = ? AND agent_id = ? AND (phase_id = ? OR (? = '' AND phase_id IS NULL))`
+	result, err := s.db.Exec(query, params.PlanID, params.AgentID, params.PhaseID, params.PhaseID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to release lock: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+
+	return &Response{
+		Result: map[string]interface{}{
+			"plan_id":  params.PlanID,
+			"phase_id": params.PhaseID,
+			"agent_id": params.AgentID,
+			"released": rowsAffected > 0,
+		},
+	}, nil
+}
+
+func (s *Server) handleAgentRegisterWork(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		AgentID   string `json:"agent_id"`
+		AgentName string `json:"agent_name,omitempty"`
+		PlanID    string `json:"plan_id"`
+		PhaseID   string `json:"phase_id,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.AgentID == "" || params.PlanID == "" {
+		return nil, fmt.Errorf("agent_id and plan_id are required")
+	}
+
+	unregQuery := `UPDATE agent_work SET status = 'inactive', heartbeat_at = ? WHERE agent_id = ? AND status = 'active'`
+	s.db.Exec(unregQuery, time.Now(), params.AgentID)
+
+	workID := generateID("work")
+	now := time.Now()
+	insertQuery := `INSERT INTO agent_work (id, agent_id, agent_name, plan_id, phase_id, status, started_at, heartbeat_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`
+	_, err := s.db.Exec(insertQuery, workID, params.AgentID, params.AgentName, params.PlanID, params.PhaseID, now, now)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register work: %w", err)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"work_id":    workID,
+			"agent_id":   params.AgentID,
+			"plan_id":    params.PlanID,
+			"phase_id":   params.PhaseID,
+			"status":     "active",
+			"started_at": now,
+		},
+	}, nil
+}
+
+func (s *Server) handleAgentUnregisterWork(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		AgentID string `json:"agent_id"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.AgentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+
+	now := time.Now()
+	query := `UPDATE agent_work SET status = 'completed', heartbeat_at = ? WHERE agent_id = ? AND status = 'active'`
+	result, err := s.db.Exec(query, now, params.AgentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unregister: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+
+	return &Response{
+		Result: map[string]interface{}{
+			"agent_id":    params.AgentID,
+			"completed":   rowsAffected > 0,
+			"finished_at": now,
+		},
+	}, nil
+}
+
+func (s *Server) handleAgentListWork(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		PlanID string `json:"plan_id,omitempty"`
+		Status string `json:"status,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	query := `SELECT id, agent_id, agent_name, plan_id, phase_id, status, started_at, heartbeat_at FROM agent_work WHERE 1=1`
+	args := []interface{}{}
+
+	if params.PlanID != "" {
+		query += " AND plan_id = ?"
+		args = append(args, params.PlanID)
+	}
+	if params.Status != "" {
+		query += " AND status = ?"
+		args = append(args, params.Status)
+	}
+
+	query += " ORDER BY started_at DESC"
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list work: %w", err)
+	}
+	defer rows.Close()
+
+	var works []map[string]interface{}
+	for rows.Next() {
+		var id, agentID, agentName, planID, phaseID, status string
+		var startedAt, heartbeatAt time.Time
+		rows.Scan(&id, &agentID, &agentName, &planID, &phaseID, &status, &startedAt, &heartbeatAt)
+
+		work := map[string]interface{}{
+			"id":           id,
+			"agent_id":     agentID,
+			"agent_name":   agentName,
+			"plan_id":      planID,
+			"phase_id":     phaseID,
+			"status":       status,
+			"started_at":   startedAt,
+			"heartbeat_at": heartbeatAt,
+		}
+		works = append(works, work)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"works": works,
+			"count": len(works),
+		},
+	}, nil
+}
+
+func (s *Server) handleCheckpointSetSLA(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		CheckpointID         string `json:"checkpoint_id"`
+		SLAHours             int    `json:"sla_hours"`
+		EscalationRecipients string `json:"escalation_recipients,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.CheckpointID == "" || params.SLAHours <= 0 {
+		return nil, fmt.Errorf("checkpoint_id and sla_hours (>0) are required")
+	}
+
+	now := time.Now()
+	expiresAt := now.Add(time.Duration(params.SLAHours) * time.Hour)
+
+	slaID := generateID("sla")
+	insertQuery := `INSERT INTO checkpoint_sla (id, checkpoint_id, sla_hours, escalation_recipients, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(insertQuery, slaID, params.CheckpointID, params.SLAHours, params.EscalationRecipients, now, expiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set SLA: %w", err)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"sla_id":        slaID,
+			"checkpoint_id": params.CheckpointID,
+			"sla_hours":     params.SLAHours,
+			"expires_at":    expiresAt,
+			"created_at":    now,
+		},
+	}, nil
+}
+
+func (s *Server) handleCheckpointEscalate(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		CheckpointID         string `json:"checkpoint_id"`
+		EscalationRecipients string `json:"escalation_recipients"`
+		Reason               string `json:"reason,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.CheckpointID == "" {
+		return nil, fmt.Errorf("checkpoint_id is required")
+	}
+
+	var slaID string
+	var slaHours int
+	var recipients string
+	slaQuery := `SELECT id, sla_hours, escalation_recipients FROM checkpoint_sla WHERE checkpoint_id = ?`
+	err := s.db.QueryRow(slaQuery, params.CheckpointID).Scan(&slaID, &slaHours, &recipients)
+	if err != nil {
+		recipients = params.EscalationRecipients
+	}
+
+	now := time.Now()
+	if slaID != "" {
+		updateQuery := `UPDATE checkpoint_sla SET escalated_at = ? WHERE id = ?`
+		s.db.Exec(updateQuery, now, slaID)
+	}
+
+	var cpTitle string
+	var planID string
+	cpQuery := `SELECT type, plan_id FROM checkpoints WHERE id = ?`
+	s.db.QueryRow(cpQuery, params.CheckpointID).Scan(&cpTitle, &planID)
+
+	if recipients != "" {
+		go s.sendWebhook(recipients, map[string]interface{}{
+			"type":         "sla_escalation",
+			"checkpoint":   params.CheckpointID,
+			"plan_id":      planID,
+			"reason":       params.Reason,
+			"message":      fmt.Sprintf("Checkpoint %s has exceeded SLA and requires immediate attention", cpTitle),
+			"escalated_at": now,
+		})
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"checkpoint_id": params.CheckpointID,
+			"escalated":     true,
+			"escalated_at":  now,
+			"recipients":    recipients,
+		},
+	}, nil
+}
+
+func (s *Server) handleCheckpointCheckSLA(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		PlanID string `json:"plan_id,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	now := time.Now()
+	query := `SELECT cs.id, cs.checkpoint_id, cs.sla_hours, cs.escalation_recipients, cs.created_at, cs.expires_at, cs.escalated_at, c.type, c.plan_id
+	          FROM checkpoint_sla cs
+	          JOIN checkpoints c ON cs.checkpoint_id = c.id
+	          WHERE cs.expires_at < ? AND cs.escalated_at IS NULL AND c.status = 'pending'`
+
+	args := []interface{}{now}
+	if params.PlanID != "" {
+		query += " AND c.plan_id = ?"
+		args = append(args, params.PlanID)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check SLA: %w", err)
+	}
+	defer rows.Close()
+
+	var expired []map[string]interface{}
+	for rows.Next() {
+		var id, cpID, recipients, cpType, pid string
+		var slaHours int
+		var createdAt, expiresAt time.Time
+		var escalatedAt *time.Time
+		rows.Scan(&id, &cpID, &slaHours, &recipients, &createdAt, &expiresAt, &escalatedAt, &cpType, &pid)
+
+		item := map[string]interface{}{
+			"sla_id":        id,
+			"checkpoint_id": cpID,
+			"sla_hours":     slaHours,
+			"expires_at":    expiresAt,
+			"overdue_hours": int(now.Sub(expiresAt).Hours()),
+			"type":          cpType,
+			"plan_id":       pid,
+		}
+
+		if escalatedAt != nil {
+			item["escalated_at"] = escalatedAt
+		}
+
+		expired = append(expired, item)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"expired_checkpoints": expired,
+			"count":               len(expired),
+			"checked_at":          now,
+		},
+	}, nil
 }
