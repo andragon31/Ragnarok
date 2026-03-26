@@ -254,9 +254,9 @@ if ($AddToPath) {
     Write-Success "Added to PATH: $BIN_DIR"
 }
 
-Write-Host "`n═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "`n---------------------------------------------------------------" -ForegroundColor Cyan
 Write-Host "  INSTALLATION COMPLETE!" -ForegroundColor Green
-Write-Host "═══════════════════════════════════════════════════════════════`n" -ForegroundColor Cyan
+Write-Host "---------------------------------------------------------------`n" -ForegroundColor Cyan
 
 Write-Host "Next steps:`n" -ForegroundColor White
 Write-Host "  1. Start the ecosystem:" -ForegroundColor White
