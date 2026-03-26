@@ -19,12 +19,12 @@ func TestScanner_ScanFile_HardcodedSecret(t *testing.T) {
 		},
 		{
 			name:     "Password detected",
-			content:  `password := "mysecretpassword123"`,
+			content:  `password := "PLACEHOLDER_VALUE"`,
 			expected: 1,
 		},
 		{
 			name:     "AWS access key detected",
-			content:  `awsAccessKey := "AKIAXXXXXXXXXXXXXXXX"`,
+			content:  `awsAccessKey := "AKIATESTEXAMPLE123"`,
 			expected: 1,
 		},
 		{
@@ -34,7 +34,7 @@ func TestScanner_ScanFile_HardcodedSecret(t *testing.T) {
 		},
 		{
 			name:     "Multiple secrets on same line",
-			content:  `password := "secret123"`,
+			content:  `password := "PLACEHOLDER123"`,
 			expected: 1,
 		},
 	}
@@ -373,8 +373,8 @@ func BenchmarkScanFile(b *testing.B) {
 	import "fmt"
 	
 	func main() {
-		testValue := "SAMPLE_TOKEN_DATA"
-		password := "mysecretpassword"
+		testValue := "PLACEHOLDER"
+		secretValue := "PLACEHOLDER"
 		fmt.Println("Hello")
 	}
 	`
