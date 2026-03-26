@@ -179,12 +179,12 @@ if (-not $buildSuccess) {
     throw "Build failed"
 }
 
-Write-Step "5. Creating MCP configuration"
+Write-Step "5. Creating MCP configuration for OpenCode"
 
 $OPENCODE_CONFIG_DIRS = @(
     "$env:APPDATA\opencode",
     "$env:LOCALAPPDATA\opencode",
-    "$env:USERPROFILE\.opencode"
+    "$env:USERPROFILE\.config\opencode"
 )
 
 $opencodeConfigDir = $null
@@ -196,7 +196,7 @@ foreach ($dir in $OPENCODE_CONFIG_DIRS) {
 }
 
 if (-not $opencodeConfigDir) {
-    $opencodeConfigDir = "$env:USERPROFILE\.opencode"
+    $opencodeConfigDir = "$env:USERPROFILE\.config\opencode"
     New-Directory $opencodeConfigDir
     Write-Warn "Created OpenCode config directory"
 } else {
@@ -213,21 +213,18 @@ $PLUGIN_PORTS = @{
 $mcpServers = @{}
 foreach ($entry in $PLUGIN_PORTS.GetEnumerator()) {
     $mcpServers[$entry.Key] = @{
-        command = Join-Path $BIN_DIR "$($entry.Key).exe"
-        args = @("serve", "--port", $entry.Value.ToString())
-        env = @{
-            "MCP_TRANSPORT" = "tcp"
-            "RAGNAROK_DATA" = $DATA_DIR
-        }
+        command = @((Join-Path $BIN_DIR "$($entry.Key).exe"), "mcp")
+        enabled = $true
+        type = "local"
     }
 }
 
-$mcpConfig = @{ mcpServers = $mcpServers }
-$mcpJsonPath = Join-Path $opencodeConfigDir ".mcp.json"
-$mcpJsonContent = $mcpConfig | ConvertTo-Json -Depth 10
-$mcpJsonContent | Set-Content $mcpJsonPath -Encoding UTF8
+$opencodeConfig = @{ mcp = $mcpServers }
+$opencodeJsonPath = Join-Path $opencodeConfigDir "opencode.json"
+$opencodeJsonContent = $opencodeConfig | ConvertTo-Json -Depth 10
+$opencodeJsonContent | Set-Content $opencodeJsonPath -Encoding UTF8
 
-Write-Success "MCP config: $mcpJsonPath"
+Write-Success "OpenCode MCP config: $opencodeJsonPath"
 
 Write-Step "6. Verifying installation"
 
@@ -257,20 +254,36 @@ if ($userPath -notlike "*$BIN_DIR*") {
     Write-Success "Already in PATH: $BIN_DIR"
 }
 
+Write-Step "8. Setting up auto-start on login"
+
+$taskName = "RagnarokServe"
+$ragExe = Join-Path $BIN_DIR "rag.exe"
+$existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+
+if ($existingTask) {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+    Write-Warn "Removed existing auto-start task"
+}
+
+$action = New-ScheduledTaskAction -Execute $ragExe -Argument "serve" -WorkingDirectory $InstallDir
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description "Start Ragnarok MCP ecosystem" | Out-Null
+
+Write-Success "Auto-start enabled: Ragnarok will start on login"
+
 Write-Host "`n---------------------------------------------------------------" -ForegroundColor Cyan
 Write-Host "  INSTALLATION COMPLETE!" -ForegroundColor Green
 Write-Host "---------------------------------------------------------------`n" -ForegroundColor Cyan
 
 Write-Host "Next steps:`n" -ForegroundColor White
 Write-Host "  1. Open a NEW terminal window" -ForegroundColor Yellow
-Write-Host "  2. Start the ecosystem:" -ForegroundColor White
-Write-Host "     rag serve" -ForegroundColor Yellow
-Write-Host ""
 Write-Host "  2. Check ecosystem health:" -ForegroundColor White
 Write-Host "     rag stats --ecosystem" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  3. Start servers:" -ForegroundColor White
-Write-Host "     rag serve" -ForegroundColor Yellow
+Write-Host "  3. Servers will auto-start on next login" -ForegroundColor Green
+Write-Host "     To manually start: rag serve" -ForegroundColor Gray
 Write-Host ""
 
 Write-Host "`nDocumentation: https://github.com/andragon31/Ragnarok" -ForegroundColor Gray
