@@ -1,18 +1,31 @@
 # Ragnarok Installer v1.1.0
 # AI Governance & Memory Layer Ecosystem
-# Usage: irm https://raw.githubusercontent.com/andragon31/Ragnarok/v1.1.0/install.ps1 | iex
+# Usage: 
+#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v1.1.0/install.ps1 | iex
+#   Or download and run manually
 
 param(
-    [string]$ProjectName = "ragnarok",
     [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok",
     [switch]$AddToPath,
-    [switch]$SkipDependencies,
     [switch]$Unattended
 )
 
-$ErrorActionPreference = "Continue"
 $VERSION = "1.1.0"
 $REPO_URL = "https://github.com/andragon31/Ragnarok"
+
+# Save script to temp if running from remote (irm | iex)
+if ($MyInvocation.InvocationName -eq "iex") {
+    $scriptPath = Join-Path $env:TEMP "ragnarok_install_$([guid]::NewGuid().ToString('N').Substring(0,8)).ps1"
+    $content = Get-Content $PSCommandPath -Raw
+    $content | Set-Content $scriptPath -Encoding UTF8
+    Write-Host "Script saved to: $scriptPath" -ForegroundColor Yellow
+    Write-Host "Running locally...`n" -ForegroundColor Yellow
+    & $scriptPath -InstallDir $InstallDir -AddToPath:$AddToPath -Unattended:$Unattended
+    Remove-Item $scriptPath -ErrorAction SilentlyContinue
+    exit
+}
+
+$ErrorActionPreference = "Continue"
 
 function Write-Step($message) {
     Write-Host "`n[STEP] $message" -ForegroundColor Cyan
@@ -55,19 +68,17 @@ Write-Host @"
 
 Write-Host "`nInstalling Ragnarok v$VERSION..." -ForegroundColor White
 
-# Detect OS
 $IS_WINDOWS = $env:OS -eq "Windows_NT"
 $IS_LINUX = $env:OSTYPE -eq "linux-gnu"
 $IS_MACOS = $env:OSTYPE -match "darwin"
 
 if (!$IS_WINDOWS -and !$IS_LINUX -and !$IS_MACOS) {
     Write-Err "Unsupported operating system"
-    exit 1
+    throw "Unsupported OS"
 }
 
 Write-Step "1. Checking prerequisites"
 
-# Check for Go
 if (Test-Command "go") {
     $goVersion = (go version) -match 'go([0-9]+\.[0-9]+)'
     if ($goVersion) {
@@ -75,22 +86,20 @@ if (Test-Command "go") {
     }
 } else {
     Write-Err "Go not found. Please install Go 1.22+ from https://go.dev/dl/"
-    exit 1
+    throw "Go not installed"
 }
 
-# Check for Git
 if (Test-Command "git") {
     Write-Success "Git installed"
 } else {
     Write-Err "Git not found. Please install Git from https://git-scm.com/"
-    exit 1
+    throw "Git not installed"
 }
 
 Write-Step "2. Creating installation directory"
 New-Directory $InstallDir
 Write-Success "Installation directory: $InstallDir"
 
-# Define paths
 $BIN_DIR = Join-Path $InstallDir "bin"
 $DATA_DIR = Join-Path $InstallDir "data"
 $FENRIR_DIR = Join-Path $DATA_DIR ".fenrir"
@@ -124,8 +133,9 @@ if ($LASTEXITCODE -ne 0) {
     
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Failed to clone repository"
-        Write-Host $gitOutput -ForegroundColor Red
-        exit 1
+        Write-Host "Run these commands manually to see the error:" -ForegroundColor Yellow
+        Write-Host "  git clone --depth 1 --branch v$VERSION $REPO_URL" -ForegroundColor Gray
+        throw "Git clone failed"
     }
 }
 
@@ -162,17 +172,15 @@ foreach ($plugin in $PLUGINS) {
     }
 }
 
-# Cleanup
 Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
 
 if (-not $buildSuccess) {
     Write-Err "Some binaries failed to build"
-    exit 1
+    throw "Build failed"
 }
 
 Write-Step "5. Creating MCP configuration"
 
-# Find OpenCode config directory
 $OPENCODE_CONFIG_DIRS = @(
     "$env:APPDATA\opencode",
     "$env:LOCALAPPDATA\opencode",
@@ -195,7 +203,6 @@ if (-not $opencodeConfigDir) {
     Write-Success "OpenCode config: $opencodeConfigDir"
 }
 
-# Create .mcp.json
 $PLUGIN_PORTS = @{
     "fenrir" = 7437
     "hati" = 7439
@@ -218,13 +225,12 @@ foreach ($entry in $PLUGIN_PORTS.GetEnumerator()) {
 $mcpConfig = @{ mcpServers = $mcpServers }
 $mcpJsonPath = Join-Path $opencodeConfigDir ".mcp.json"
 $mcpJsonContent = $mcpConfig | ConvertTo-Json -Depth 10
-$mcpJsonContent | Set-Content -Path $mcpJsonPath -Encoding UTF8
+$mcpJsonContent | Set-Content $mcpJsonPath -Encoding UTF8
 
 Write-Success "MCP config: $mcpJsonPath"
 
 Write-Step "6. Verifying installation"
 
-$allGood = $true
 foreach ($plugin in $PLUGINS) {
     $exePath = Join-Path $BIN_DIR "$($plugin.Name).exe"
     if (Test-Path $exePath) {
@@ -236,7 +242,6 @@ foreach ($plugin in $PLUGINS) {
         }
     } else {
         Write-Err "$($plugin.Name): not found"
-        $allGood = $false
     }
 }
 
@@ -257,10 +262,7 @@ Write-Host "Next steps:`n" -ForegroundColor White
 Write-Host "  1. Start the ecosystem:" -ForegroundColor White
 Write-Host "     $BIN_DIR\rag.exe serve" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  2. Initialize a project:" -ForegroundColor White
-Write-Host "     $BIN_DIR\rag.exe init --project my-project" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "  3. Check ecosystem health:" -ForegroundColor White
+Write-Host "  2. Check ecosystem health:" -ForegroundColor White
 Write-Host "     $BIN_DIR\rag.exe stats --ecosystem" -ForegroundColor Yellow
 Write-Host ""
 
@@ -270,10 +272,4 @@ if (-not $AddToPath) {
 }
 
 Write-Host "`nDocumentation: https://github.com/andragon31/Ragnarok" -ForegroundColor Gray
-
-if ($Unattended) {
-    exit 0
-}
-
-Write-Host "`nPress Enter to exit..." -ForegroundColor Gray
-Read-Host
+Write-Host ""
