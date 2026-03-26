@@ -245,13 +245,16 @@ foreach ($plugin in $PLUGINS) {
     }
 }
 
-if ($AddToPath) {
-    Write-Step "7. Adding to PATH"
-    $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+Write-Step "7. Adding to PATH"
+
+$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+if ($userPath -notlike "*$BIN_DIR*") {
     $newPath = "$userPath;$BIN_DIR"
     [Environment]::SetEnvironmentVariable('PATH', $newPath, 'User')
     $env:PATH = $newPath
     Write-Success "Added to PATH: $BIN_DIR"
+} else {
+    Write-Success "Already in PATH: $BIN_DIR"
 }
 
 Write-Host "`n---------------------------------------------------------------" -ForegroundColor Cyan
@@ -259,17 +262,16 @@ Write-Host "  INSTALLATION COMPLETE!" -ForegroundColor Green
 Write-Host "---------------------------------------------------------------`n" -ForegroundColor Cyan
 
 Write-Host "Next steps:`n" -ForegroundColor White
-Write-Host "  1. Start the ecosystem:" -ForegroundColor White
-Write-Host "     $BIN_DIR\rag.exe serve" -ForegroundColor Yellow
+Write-Host "  1. Open a NEW terminal window" -ForegroundColor Yellow
+Write-Host "  2. Start the ecosystem:" -ForegroundColor White
+Write-Host "     rag serve" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  2. Check ecosystem health:" -ForegroundColor White
-Write-Host "     $BIN_DIR\rag.exe stats --ecosystem" -ForegroundColor Yellow
+Write-Host "     rag stats --ecosystem" -ForegroundColor Yellow
 Write-Host ""
-
-if (-not $AddToPath) {
-    Write-Host "  To add to PATH permanently, run:" -ForegroundColor White
-    Write-Host "     [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'User') + ';$BIN_DIR', 'User')" -ForegroundColor Yellow
-}
+Write-Host "  3. Start servers:" -ForegroundColor White
+Write-Host "     rag serve" -ForegroundColor Yellow
+Write-Host ""
 
 Write-Host "`nDocumentation: https://github.com/andragon31/Ragnarok" -ForegroundColor Gray
 Write-Host ""
