@@ -1076,6 +1076,87 @@ flowchart TB
 
 ## 5. Guía de Usuario
 
+### 5.0 🚀 Instalación (Instalador Automático)
+
+#### Instalación con una línea (recomendado)
+
+```powershell
+# PowerShell (Windows)
+irm https://tinyurl.com/ragnarok-install | iex
+
+# O usar la URL directa
+irm https://raw.githubusercontent.com/ragnarok-ecosystem/ragnarok/main/install.ps1 | iex
+```
+
+#### Instalación manual
+
+```bash
+# Clonar el repositorio
+git clone https://github.com/ragnarok-ecosystem/ragnarok
+cd ragnarok
+
+# Ejecutar el instalador
+.\install.ps1
+
+# O usar el instalador rápido
+.\install_quick.ps1
+```
+
+#### Opciones del instalador
+
+```powershell
+# Instalación completa con PATH
+.\install.ps1 -AddToPath
+
+# Directorio personalizado
+.\install.ps1 -InstallDir "D:\Apps\Ragnarok"
+
+# Instalación desatendida (sin prompts)
+.\install.ps1 -Unattended
+```
+
+#### Verificar la instalación
+
+```powershell
+# Después de instalar, ejecuta:
+.\verify_install.ps1
+
+# O manualmente:
+.\rag.exe version
+.\rag.exe stats --ecosystem
+```
+
+#### Post-instalación
+
+1. **Agregar al PATH** (si no se usó `-AddToPath`):
+   ```powershell
+   # PowerShell
+   $env:PATH += ';C:\Users\tu\LocalAppData\Ragnarok\bin'
+   
+   # Agregar permanentemente al perfil:
+   Add-Content $PROFILE '$env:PATH += ";C:\Users\tu\LocalAppData\Ragnarok\bin"'
+   ```
+
+2. **Iniciar el ecosistema**:
+   ```bash
+   rag serve
+   ```
+
+3. **Verificar**:
+   ```bash
+   rag stats --ecosystem
+   ```
+
+#### Solución de problemas de instalación
+
+| Problema | Solución |
+|----------|----------|
+| `Invoke-WebRequest` bloqueado | Usar `curl` o descargar manualmente |
+| Go no instalado | El instalador intenta descargar binarios pre-compilados |
+| OpenCode no detectado | El instalador crea `.mcp.json` en `~/.opencode/` |
+
+---
+
 ### 5.1 🚀 Primeros Pasos - Flujo Completo
 
 ```mermaid
