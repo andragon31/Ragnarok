@@ -10,14 +10,12 @@ param(
     [switch]$Unattended
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $VERSION = "1.1.0"
 $REPO_URL = "https://github.com/andragon31/Ragnarok"
-$BINARIES_URL = "https://github.com/andragon31/Ragnarok/releases/download/v$VERSION"
 
 function Write-Step($message) {
-    $colors = @{ForegroundColor = "Cyan"; BackgroundColor = "Black"}
-    Write-Host "`n[STEP] $message" @colors
+    Write-Host "`n[STEP] $message" -ForegroundColor Cyan
 }
 
 function Write-Success($message) {
@@ -36,24 +34,14 @@ function Test-Command($cmd) {
     try { Get-Command $cmd -ErrorAction Stop | Out-Null; return $true } catch { return $false }
 }
 
-function Get-Downloader {
-    if (Test-Command "curl") { return { curl -L -o $args[1] $args[0] } }
-    if (Test-Command "Invoke-WebRequest") { return { Invoke-WebRequest -Uri $args[0] -OutFile $args[1] } }
-    throw "No downloader found. Install curl or use PowerShell 5+"
-}
-
 function New-Directory($path) {
     if (!(Test-Path $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
 }
 
-function Expand-Zip($zipPath, $dest) {
-    Expand-Archive -Path $zipPath -DestinationPath $dest -Force
-}
-
 Write-Host @"
-                                    `
+                                    _
      _  _   _ ___ ___    _ _____ _  _ ___ _  _ ___    _   _ _____
     | \| | | | __| _ \  / \_   _| || | __| \| |   \  | | | |_   _|
     | .` | |_| _||   / / _ \| | | __ | _|| .` | |) | | |_| | | |
@@ -79,23 +67,23 @@ if (!$IS_WINDOWS -and !$IS_LINUX -and !$IS_MACOS) {
 
 Write-Step "1. Checking prerequisites"
 
-# Check for Go (required to build)
-if (!$SkipDependencies) {
-    if (Test-Command "go") {
-        $goVersion = (go version) -match 'go([0-9]+\.[0-9]+)'
-        if ($goVersion) {
-            Write-Success "Go installed: $($Matches[1])"
-        }
-    } else {
-        Write-Warn "Go not found. Installing Ragnarok from pre-built binaries instead."
+# Check for Go
+if (Test-Command "go") {
+    $goVersion = (go version) -match 'go([0-9]+\.[0-9]+)'
+    if ($goVersion) {
+        Write-Success "Go installed: $($Matches[1])"
     }
+} else {
+    Write-Err "Go not found. Please install Go 1.22+ from https://go.dev/dl/"
+    exit 1
 }
 
 # Check for Git
 if (Test-Command "git") {
     Write-Success "Git installed"
 } else {
-    Write-Warn "Git not found. Some features may not work."
+    Write-Err "Git not found. Please install Git from https://git-scm.com/"
+    exit 1
 }
 
 Write-Step "2. Creating installation directory"
@@ -111,6 +99,7 @@ $SKOLL_DIR = Join-Path $DATA_DIR ".skoll"
 $TYR_DIR = Join-Path $DATA_DIR ".tyr"
 
 New-Directory $BIN_DIR
+New-Directory $DATA_DIR
 New-Directory $FENRIR_DIR
 New-Directory $HATI_DIR
 New-Directory $SKOLL_DIR
@@ -118,123 +107,76 @@ New-Directory $TYR_DIR
 
 Write-Success "Data directories created"
 
-Write-Step "3. Downloading binaries"
+Write-Step "3. Cloning repository"
+
+$TEMP_DIR = Join-Path $env:TEMP "ragnarok_build_$([guid]::NewGuid().ToString('N').Substring(0,8))"
+Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Host "  Cloning $REPO_URL (tag v$VERSION)..." -NoNewline
+
+$gitArgs = @("clone", "--depth", "1", "--branch", "v$VERSION", $REPO_URL, $TEMP_DIR)
+$gitOutput = & git @gitArgs 2>&1
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Warn "Clone failed. Trying main branch..."
+    $gitArgs = @("clone", "--depth", "1", $REPO_URL, $TEMP_DIR)
+    $gitOutput = & git @gitArgs 2>&1
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Failed to clone repository"
+        Write-Host $gitOutput -ForegroundColor Red
+        exit 1
+    }
+}
+
+Write-Success "Repository cloned"
+
+Write-Step "4. Building binaries"
 
 $PLUGINS = @(
-    @{Name="fenrir"; Port=7437},
-    @{Name="hati"; Port=7439},
-    @{Name="skoll"; Port=7438},
-    @{Name="tyr"; Port=7440},
-    @{Name="rag"; Port=0}
+    @{Name="fenrir"; Path=".\fenrir\cmd\fenrir"},
+    @{Name="hati"; Path=".\hati\cmd\hati"},
+    @{Name="skoll"; Path=".\skoll\cmd\skoll"},
+    @{Name="tyr"; Path=".\tyr\cmd\tyr"},
+    @{Name="rag"; Path=".\installer\cmd\rag"}
 )
 
-$OS_SUFFIX = ""
-if ($IS_LINUX) { $OS_SUFFIX = "-linux-amd64" }
-if ($IS_MACOS) { $OS_SUFFIX = "-darwin-amd64" }
-if ($IS_WINDOWS) { $OS_SUFFIX = "-windows-amd64.zip" }
-
-$download = Get-Downloader
+$buildSuccess = $true
 
 foreach ($plugin in $PLUGINS) {
-    $binName = $plugin.Name
-    if ($IS_WINDOWS) {
-        $remoteUrl = "$BINARIES_URL/${binName}$OS_SUFFIX"
-        $localZip = Join-Path $InstallDir "${binName}.zip"
-        $localExe = Join-Path $BIN_DIR "${binName}.exe"
-        
-        Write-Host "  Downloading $binName..." -NoNewline
-        try {
-            & $download $remoteUrl $localZip
-            if (Test-Path $localZip) {
-                Expand-Zip $localZip $BIN_DIR
-                # Move exe from nested folder if needed
-                $nestedExe = Get-ChildItem -Path $BIN_DIR -Filter "${binName}.exe" -Recurse | Select-Object -First 1
-                if ($nestedExe) {
-                    Move-Item -Path $nestedExe.FullName -Destination $localExe -Force
-                    Remove-Item -Path $nestedExe.DirectoryName -Recurse -Force -ErrorAction SilentlyContinue
-                }
-                Remove-Item $localZip -Force -ErrorAction SilentlyContinue
-                Write-Success $binName
-            } else {
-                Write-Warn "$binName (using build from source)"
-            }
-        } catch {
-            Write-Warn "$binName (download failed, will build from source)"
-        }
+    $outFile = Join-Path $BIN_DIR "$($plugin.Name).exe"
+    Write-Host "  Building $($plugin.Name)..." -NoNewline
+    
+    Push-Location $TEMP_DIR
+    $buildArgs = @("build", "-ldflags=-s -w", "-o", $outFile, $plugin.Path)
+    $buildOutput = & go @buildArgs 2>&1
+    Pop-Location
+    
+    if ($LASTEXITCODE -eq 0 -and (Test-Path $outFile)) {
+        $size = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
+        Write-Success "$($plugin.Name) ($size MB)"
     } else {
-        # For Linux/macOS, download tar.gz
-        $remoteUrl = "$BINARIES_URL/${binName}$OS_SUFFIX.tar.gz"
-        Write-Host "  Downloading $binName..." -NoNewline
-        try {
-            & $download $remoteUrl (Join-Path $InstallDir "${binName}.tar.gz")
-            Write-Success $binName
-        } catch {
-            Write-Warn "$binName (download failed)"
-        }
+        Write-Err "$($plugin.Name) failed"
+        if ($buildOutput) { Write-Host $buildOutput -ForegroundColor Gray }
+        $buildSuccess = $false
     }
 }
 
-# If no pre-built binaries, clone and build from source
-$hasBinaries = Get-ChildItem -Path $BIN_DIR -Filter "*.exe" -ErrorAction SilentlyContinue | Measure-Object
-if ($hasBinaries.Count -eq 0) {
-    Write-Step "3b. Building from source"
-    
-    Write-Host "  Cloning repository..." -NoNewline
-    $TEMP_DIR = Join-Path $env:TEMP "ragnarok_build"
-    Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
-    
-    try {
-        git clone --depth 1 --branch "v$VERSION" $REPO_URL $TEMP_DIR 2>$null
-        Write-Success "Repository cloned"
-    } catch {
-        Write-Warn "Clone failed. Trying main branch..."
-        git clone --depth 1 $REPO_URL $TEMP_DIR 2>$null
-    }
-    
-    if (Test-Path (Join-Path $TEMP_DIR "go.mod")) {
-        Write-Host "  Building binaries..." -NoNewline
-        
-        $buildCmds = @(
-            "go build -ldflags='-s -w' -o '$BIN_DIR/fenrir.exe' ./fenrir/cmd/fenrir",
-            "go build -ldflags='-s -w' -o '$BIN_DIR/hati.exe' ./hati/cmd/hati",
-            "go build -ldflags='-s -w' -o '$BIN_DIR/skoll.exe' ./skoll/cmd/skoll",
-            "go build -ldflags='-s -w' -o '$BIN_DIR/tyr.exe' ./tyr/cmd/tyr",
-            "go build -ldflags='-s -w' -o '$BIN_DIR/rag.exe' ./installer/cmd/rag"
-        )
-        
-        foreach ($cmd in $buildCmds) {
-            $parts = $cmd -split ' -o '
-            $outPath = $parts[1] -replace "'", ""
-            $buildCmd = ($cmd -split ' -o ')[0]
-            
-            Push-Location $TEMP_DIR
-            try {
-                Invoke-Expression $buildCmd 2>$null
-                if (Test-Path $outPath) {
-                    Write-Host "." -NoNewline
-                }
-            } catch {
-                Write-Host "!" -NoNewline
-            }
-            Pop-Location
-        }
-        
-        Write-Success "Build complete"
-        Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
-    } else {
-        Write-Err "Could not build from source. Go may not be installed."
-        Write-Host "Please install Go 1.22+ and run installer again."
-    }
+# Cleanup
+Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
+
+if (-not $buildSuccess) {
+    Write-Err "Some binaries failed to build"
+    exit 1
 }
 
-Write-Step "4. Detecting OpenCode configuration directory"
+Write-Step "5. Creating MCP configuration"
 
-# Try common OpenCode config locations
+# Find OpenCode config directory
 $OPENCODE_CONFIG_DIRS = @(
     "$env:APPDATA\opencode",
     "$env:LOCALAPPDATA\opencode",
-    "$env:USERPROFILE\.opencode",
-    "$env:HOME\.opencode"
+    "$env:USERPROFILE\.opencode"
 )
 
 $opencodeConfigDir = $null
@@ -245,33 +187,15 @@ foreach ($dir in $OPENCODE_CONFIG_DIRS) {
     }
 }
 
-# Also check for .mcp.json in common locations
-$MCP_CONFIG_LOCATIONS = @(
-    "$env:APPDATA\opencode\.mcp.json",
-    "$env:LOCALAPPDATA\opencode\.mcp.json",
-    "$env:USERPROFILE\.mcp.json",
-    "$env:HOME\.opencode\.mcp.json"
-)
-
-$existingMcp = $null
-foreach ($loc in $MCP_CONFIG_LOCATIONS) {
-    if (Test-Path $loc) {
-        $existingMcp = $loc
-        break
-    }
-}
-
-if ($opencodeConfigDir) {
-    Write-Success "OpenCode config: $opencodeConfigDir"
-} else {
-    Write-Warn "OpenCode not found. Will create config in user's home."
+if (-not $opencodeConfigDir) {
     $opencodeConfigDir = "$env:USERPROFILE\.opencode"
     New-Directory $opencodeConfigDir
+    Write-Warn "Created OpenCode config directory"
+} else {
+    Write-Success "OpenCode config: $opencodeConfigDir"
 }
 
-Write-Step "5. Creating MCP configuration (.mcp.json)"
-
-# Generate .mcp.json content
+# Create .mcp.json
 $PLUGIN_PORTS = @{
     "fenrir" = 7437
     "hati" = 7439
@@ -280,12 +204,10 @@ $PLUGIN_PORTS = @{
 }
 
 $mcpServers = @{}
-foreach ($plugin in $PLUGINS) {
-    if ($plugin.Port -eq 0) { continue }  # Skip 'rag'
-    
-    $mcpServers[$plugin.Name] = @{
-        command = Join-Path $BIN_DIR "$($plugin.Name).exe"
-        args = @("serve", "--port", $PLUGIN_PORTS[$plugin.Name].ToString())
+foreach ($entry in $PLUGIN_PORTS.GetEnumerator()) {
+    $mcpServers[$entry.Key] = @{
+        command = Join-Path $BIN_DIR "$($entry.Key).exe"
+        args = @("serve", "--port", $entry.Value.ToString())
         env = @{
             "MCP_TRANSPORT" = "tcp"
             "RAGNAROK_DATA" = $DATA_DIR
@@ -293,88 +215,38 @@ foreach ($plugin in $PLUGINS) {
     }
 }
 
-$mcpConfig = @{
-    mcpServers = $mcpServers
-}
-
+$mcpConfig = @{ mcpServers = $mcpServers }
 $mcpJsonPath = Join-Path $opencodeConfigDir ".mcp.json"
 $mcpJsonContent = $mcpConfig | ConvertTo-Json -Depth 10
 $mcpJsonContent | Set-Content -Path $mcpJsonPath -Encoding UTF8
 
 Write-Success "MCP config: $mcpJsonPath"
 
-# Backup existing .mcp.json if exists
-if ($existingMcp -and $existingMcp -ne $mcpJsonPath) {
-    Write-Host "  Backed up existing config to $($existingMcp).bak"
-    Copy-Item $existingMcp "$existingMcp.bak" -Force
-}
-
-Write-Step "6. Creating plugin data directories"
-
-# Create data directory structure
-$DATA_STRUCTURE = @{
-    ".fenrir" = @("memory", "graphs", "config.json")
-    ".hati" = @("plans", "checkpoints", "config.json")
-    ".skoll" = @("skills", "rules", "config.json")
-    ".tyr" = @("standards", "findings", "config.json")
-}
-
-foreach ($dir in @($FENRIR_DIR, $HATI_DIR, $SKOLL_DIR, $TYR_DIR)) {
-    New-Directory $dir
-}
-
-Write-Success "Data directories initialized"
-
-Write-Step "7. Creating rag wrapper scripts"
-
-# Create rag.cmd for easy access
-$ragCmdContent = "@echo off
-`"$BIN_DIR\rag.exe`" %*
-"
-$ragCmdPath = Join-Path $BIN_DIR "rag.cmd"
-$ragCmdContent | Set-Content -Path $ragCmdPath -Encoding ASCII
-
-Write-Success "Created rag wrapper"
-
-Write-Step "8. Setting up PATH"
-
-$PATH_SETUP = @"
-To add Ragnarok to your PATH, run:
-
-    \$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-    [Environment]::SetEnvironmentVariable('PATH', '\$userPath;$BIN_DIR', 'User')
-
-Or add this line to your PowerShell profile (~/.config/powershell/Microsoft.PowerShell_profile.ps1):
-
-    \$env:PATH += ';$BIN_DIR'
-"@
-
-if ($AddToPath) {
-    $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-    $newPath = "$userPath;$BIN_DIR"
-    [Environment]::SetEnvironmentVariable('PATH', $newPath, 'User')
-    $env:PATH = $newPath
-    Write-Success "Added to PATH: $BIN_DIR"
-} else {
-    Write-Host $PATH_SETUP -ForegroundColor Yellow
-}
-
-Write-Step "9. Verifying installation"
+Write-Step "6. Verifying installation"
 
 $allGood = $true
 foreach ($plugin in $PLUGINS) {
     $exePath = Join-Path $BIN_DIR "$($plugin.Name).exe"
     if (Test-Path $exePath) {
         $version = & $exePath version 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "$($plugin.Name): $version" -ForegroundColor Green
+        if ($LASTEXITCODE -eq 0 -and $version) {
+            Write-Success "$($plugin.Name): $version"
         } else {
-            Write-Warn "$($plugin.Name): installed but failed to run"
+            Write-Warn "$($plugin.Name): installed but failed to respond"
         }
     } else {
         Write-Err "$($plugin.Name): not found"
         $allGood = $false
     }
+}
+
+if ($AddToPath) {
+    Write-Step "7. Adding to PATH"
+    $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+    $newPath = "$userPath;$BIN_DIR"
+    [Environment]::SetEnvironmentVariable('PATH', $newPath, 'User')
+    $env:PATH = $newPath
+    Write-Success "Added to PATH: $BIN_DIR"
 }
 
 Write-Host "`n═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
@@ -383,29 +255,25 @@ Write-Host "══════════════════════�
 
 Write-Host "Next steps:`n" -ForegroundColor White
 Write-Host "  1. Start the ecosystem:" -ForegroundColor White
-Write-Host "     .\$BIN_DIR\rag.exe serve" -ForegroundColor Yellow
+Write-Host "     $BIN_DIR\rag.exe serve" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  2. Initialize a project:" -ForegroundColor White
-Write-Host "     .\$BIN_DIR\rag.exe init --project my-project" -ForegroundColor Yellow
+Write-Host "     $BIN_DIR\rag.exe init --project my-project" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  3. Scan and bootstrap:" -ForegroundColor White
-Write-Host "     .\$BIN_DIR\rag.exe scan --path .\my-project" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "  4. Check ecosystem health:" -ForegroundColor White
-Write-Host "     .\$BIN_DIR\rag.exe stats --ecosystem" -ForegroundColor Yellow
+Write-Host "  3. Check ecosystem health:" -ForegroundColor White
+Write-Host "     $BIN_DIR\rag.exe stats --ecosystem" -ForegroundColor Yellow
 Write-Host ""
 
-if (!$AddToPath) {
-    Write-Host "  5. Add to PATH permanently:" -ForegroundColor White
-    Write-Host "     \$env:PATH += ';$BIN_DIR'" -ForegroundColor Yellow
-    Write-Host "     (Add this to your PowerShell profile)" -ForegroundColor Gray
+if (-not $AddToPath) {
+    Write-Host "  To add to PATH permanently, run:" -ForegroundColor White
+    Write-Host "     [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'User') + ';$BIN_DIR', 'User')" -ForegroundColor Yellow
 }
 
-Write-Host "`nDocumentation: https://github.com/ragnarok-ecosystem/ragnarok" -ForegroundColor Gray
+Write-Host "`nDocumentation: https://github.com/andragon31/Ragnarok" -ForegroundColor Gray
 
 if ($Unattended) {
     exit 0
 }
 
-Write-Host "`nPress any key to exit..." -ForegroundColor Gray
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+Write-Host "`nPress Enter to exit..." -ForegroundColor Gray
+Read-Host
