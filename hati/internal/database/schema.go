@@ -112,11 +112,39 @@ func InitSchema(db *sql.DB) error {
 		created_at DATETIME NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS plan_revisions (
+		id TEXT PRIMARY KEY,
+		plan_id TEXT NOT NULL,
+		feedback_id TEXT,
+		previous_state TEXT,
+		new_state TEXT,
+		changes_summary TEXT,
+		status TEXT DEFAULT 'pending',
+		created_at DATETIME NOT NULL,
+		applied_at DATETIME,
+		FOREIGN KEY (plan_id) REFERENCES plans(id),
+		FOREIGN KEY (feedback_id) REFERENCES feedback(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS execution_blockers (
+		id TEXT PRIMARY KEY,
+		plan_id TEXT NOT NULL,
+		checkpoint_id TEXT,
+		reason TEXT NOT NULL,
+		type TEXT NOT NULL,
+		blocked_at DATETIME NOT NULL,
+		resolved_at DATETIME,
+		FOREIGN KEY (plan_id) REFERENCES plans(id),
+		FOREIGN KEY (checkpoint_id) REFERENCES checkpoints(id)
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_plans_session ON plans(session_id);
 	CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
 	CREATE INDEX IF NOT EXISTS idx_phases_plan ON phases(plan_id);
 	CREATE INDEX IF NOT EXISTS idx_checkpoints_plan ON checkpoints(plan_id);
 	CREATE INDEX IF NOT EXISTS idx_checkpoints_type ON checkpoints(type);
+	CREATE INDEX IF NOT EXISTS idx_plan_revisions_plan ON plan_revisions(plan_id);
+	CREATE INDEX IF NOT EXISTS idx_execution_blockers_plan ON execution_blockers(plan_id);
 	`
 
 	_, err := db.Exec(schema)

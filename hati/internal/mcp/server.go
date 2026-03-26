@@ -62,10 +62,14 @@ func (s *Server) registerHandlers() {
 	s.handlers["plan_complete"] = s.handlePlanComplete
 	s.handlers["plan_completeness"] = s.handlePlanCompleteness
 	s.handlers["plan_quality"] = s.handlePlanQuality
+	s.handlers["plan_restart"] = s.handlePlanRestart
+	s.handlers["plan_resume"] = s.handlePlanResume
+	s.handlers["plan_blockers"] = s.handlePlanBlockers
 
 	s.handlers["checkpoint_open"] = s.handleCheckpointOpen
 	s.handlers["checkpoint_decide"] = s.handleCheckpointDecide
 	s.handlers["checkpoint_status"] = s.handleCheckpointStatus
+	s.handlers["checkpoint_approve"] = s.handleCheckpointApprove
 
 	s.handlers["phase_start"] = s.handlePhaseStart
 	s.handlers["phase_report"] = s.handlePhaseReport

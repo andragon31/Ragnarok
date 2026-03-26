@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -130,26 +131,93 @@ func (s *Server) handlePlanList(ctx context.Context, req *Request) (*Response, e
 
 func (s *Server) handlePlanRevise(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
-		PlanID string `json:"plan_id"`
-		Title  string `json:"title,omitempty"`
-		Notes  string `json:"notes,omitempty"`
+		PlanID      string   `json:"plan_id"`
+		Title       string   `json:"title,omitempty"`
+		Description string   `json:"description,omitempty"`
+		NewPhases   []string `json:"new_phases,omitempty"`
+		Notes       string   `json:"notes,omitempty"`
+		RevisionID  string   `json:"revision_id,omitempty"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
-	query := `UPDATE plans SET updated_at = ? WHERE id = ?`
-	_, err := s.db.Exec(query, time.Now(), params.PlanID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to revise plan: %w", err)
+	if params.PlanID == "" {
+		return nil, fmt.Errorf("plan_id is required")
 	}
+
+	var currentPlan Plan
+	query := `SELECT id, title, description, status FROM plans WHERE id = ?`
+	err := s.db.QueryRow(query, params.PlanID).Scan(&currentPlan.ID, &currentPlan.Title, &currentPlan.Description, &currentPlan.Status)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("plan not found: %s", params.PlanID)
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to query plan: %w", err)
+	}
+
+	revisionID := params.RevisionID
+	if revisionID == "" {
+		revisionID = generateID("rev")
+	}
+
+	var changesSummary string
+	if params.Title != "" && params.Title != currentPlan.Title {
+		changesSummary += fmt.Sprintf("title: '%s' -> '%s'; ", currentPlan.Title, params.Title)
+	}
+	if params.Description != "" && params.Description != currentPlan.Description {
+		changesSummary += fmt.Sprintf("description updated; ")
+	}
+	if len(params.NewPhases) > 0 {
+		changesSummary += fmt.Sprintf("phases updated (%d new phases); ", len(params.NewPhases))
+	}
+
+	if changesSummary == "" {
+		changesSummary = "no changes detected"
+	}
+
+	prevState := fmt.Sprintf("status=%s", currentPlan.Status)
+	newState := "needs_revision"
+
+	insertRev := `INSERT INTO plan_revisions (id, plan_id, previous_state, new_state, changes_summary, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)`
+	s.db.Exec(insertRev, revisionID, params.PlanID, prevState, newState, changesSummary, time.Now())
+
+	if params.RevisionID != "" {
+		updateRevQuery := `UPDATE plan_revisions SET status = 'applied', applied_at = ? WHERE id = ?`
+		s.db.Exec(updateRevQuery, time.Now(), params.RevisionID)
+	}
+
+	if params.Title != "" {
+		updatePlanQuery := `UPDATE plans SET title = ?, status = 'needs_revision', updated_at = ? WHERE id = ?`
+		s.db.Exec(updatePlanQuery, params.Title, time.Now(), params.PlanID)
+	}
+
+	if params.Description != "" {
+		updatePlanQuery := `UPDATE plans SET description = ?, status = 'needs_revision', updated_at = ? WHERE id = ?`
+		s.db.Exec(updatePlanQuery, params.Description, time.Now(), params.PlanID)
+	}
+
+	if len(params.NewPhases) > 0 {
+		for i, phaseName := range params.NewPhases {
+			phaseID := generateID("phase")
+			insertPhase := `INSERT INTO phases (id, plan_id, name, status, order_num, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?)`
+			s.db.Exec(insertPhase, phaseID, params.PlanID, phaseName, i+1, time.Now(), time.Now())
+		}
+		updatePlanQuery := `UPDATE plans SET status = 'needs_revision', updated_at = ? WHERE id = ?`
+		s.db.Exec(updatePlanQuery, time.Now(), params.PlanID)
+	}
+
+	blockerQuery := `INSERT INTO execution_blockers (id, plan_id, reason, type, blocked_at) VALUES (?, ?, ?, 'revision_required', ?)`
+	s.db.Exec(blockerQuery, generateID("block"), params.PlanID, changesSummary, time.Now())
 
 	return &Response{
 		Result: map[string]interface{}{
-			"id":         params.PlanID,
-			"status":     "revised",
-			"revised_at": time.Now(),
+			"id":              params.PlanID,
+			"revision_id":     revisionID,
+			"status":          "needs_revision",
+			"changes_summary": changesSummary,
+			"revised_at":      time.Now(),
+			"notes":           params.Notes,
 		},
 	}, nil
 }
@@ -502,19 +570,269 @@ func (s *Server) handleFeedbackReceive(ctx context.Context, req *Request) (*Resp
 		FeedbackID string `json:"feedback_id"`
 		Content    string `json:"content"`
 		Author     string `json:"author,omitempty"`
+		Type       string `json:"type,omitempty"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	feedbackType := params.Type
+	if feedbackType == "" {
+		feedbackType = detectFeedbackType(params.Content)
+	}
+
+	isRejection := isRejectionFeedback(params.Content, feedbackType)
+
+	result := map[string]interface{}{
+		"feedback_id":  params.FeedbackID,
+		"received":     true,
+		"content":      params.Content,
+		"author":       params.Author,
+		"type":         feedbackType,
+		"is_rejection": isRejection,
+		"received_at":  time.Now(),
+	}
+
+	if isRejection {
+		var cp Checkpoint
+		cpQuery := `SELECT id, plan_id, phase_id FROM checkpoints WHERE id = ?`
+		err := s.db.QueryRow(cpQuery, params.FeedbackID).Scan(&cp.ID, &cp.PlanID, &cp.PhaseID)
+		if err == nil && cp.PlanID != "" {
+			updateCpQuery := `UPDATE checkpoints SET status = 'rejected', can_continue = 0, feedback = ? WHERE id = ?`
+			s.db.Exec(updateCpQuery, params.Content, cp.ID)
+
+			blockerID := generateID("block")
+			blockReason := fmt.Sprintf("User rejection: %s", params.Content)
+			blockerQuery := `INSERT INTO execution_blockers (id, plan_id, checkpoint_id, reason, type, blocked_at) VALUES (?, ?, ?, ?, 'user_rejection', ?)`
+			s.db.Exec(blockerQuery, blockerID, cp.PlanID, cp.ID, blockReason, time.Now())
+
+			abandonQuery := `UPDATE plans SET status = 'needs_revision', updated_at = ? WHERE id = ?`
+			s.db.Exec(abandonQuery, time.Now(), cp.PlanID)
+
+			result["action_triggered"] = "plan_revise"
+			result["plan_id"] = cp.PlanID
+			result["checkpoint_id"] = cp.ID
+			result["message"] = "Rejection detected. Plan marked for revision. Use plan_revise to update and plan_restart to continue."
+		}
+	}
+
+	return &Response{Result: result}, nil
+}
+
+func detectFeedbackType(content string) string {
+	contentLower := strings.ToLower(content)
+	if strings.Contains(contentLower, "reject") || strings.Contains(contentLower, "not correct") {
+		return "rejection"
+	}
+	if strings.Contains(contentLower, "approve") || strings.Contains(contentLower, "lgtm") {
+		return "approval"
+	}
+	if strings.Contains(contentLower, "escalate") || strings.Contains(contentLower, "urgent") {
+		return "escalation"
+	}
+	return "general"
+}
+
+func isRejectionFeedback(content string, feedbackType string) bool {
+	if feedbackType == "rejection" {
+		return true
+	}
+	contentLower := strings.ToLower(content)
+	rejectionPhrases := []string{
+		"no es correcto", "not correct", "wrong", "incorrect",
+		"esto no", "that's wrong", "not right", "doesn't look right",
+		"no estoy de acuerdo", "i disagree", "reject", "rechazo",
+		"no debería", "should not", "please stop", "hold on",
+		"espera", "wait", "hold", "revisa esto", "review this",
+	}
+	for _, phrase := range rejectionPhrases {
+		if strings.Contains(contentLower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) handlePlanRestart(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		PlanID     string `json:"plan_id"`
+		FromPhase  int    `json:"from_phase,omitempty"`
+		ClearState bool   `json:"clear_state,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.PlanID == "" {
+		return nil, fmt.Errorf("plan_id is required")
+	}
+
+	var currentStatus string
+	statusQuery := `SELECT status FROM plans WHERE id = ?`
+	s.db.QueryRow(statusQuery, params.PlanID).Scan(&currentStatus)
+
+	if currentStatus == "needs_revision" {
+		return nil, fmt.Errorf("plan has pending revisions, use plan_revise first")
+	}
+
+	if currentStatus == "in_progress" {
+		return nil, fmt.Errorf("plan is already in progress")
+	}
+
+	startPhase := 1
+	if params.FromPhase > 0 {
+		startPhase = params.FromPhase
+	}
+
+	resetPhasesQuery := `UPDATE phases SET status = 'pending' WHERE plan_id = ? AND order_num >= ?`
+	s.db.Exec(resetPhasesQuery, params.PlanID, startPhase)
+
+	clearBlockersQuery := `UPDATE execution_blockers SET resolved_at = ? WHERE plan_id = ? AND resolved_at IS NULL`
+	s.db.Exec(clearBlockersQuery, time.Now(), params.PlanID)
+
+	updatePlanQuery := `UPDATE plans SET status = 'in_progress', updated_at = ? WHERE id = ?`
+	s.db.Exec(updatePlanQuery, time.Now(), params.PlanID)
+
 	return &Response{
 		Result: map[string]interface{}{
-			"feedback_id": params.FeedbackID,
-			"received":    true,
-			"content":     params.Content,
-			"author":      params.Author,
-			"received_at": time.Now(),
+			"id":           params.PlanID,
+			"status":       "in_progress",
+			"restarted_at": time.Now(),
+			"from_phase":   startPhase,
+			"message":      fmt.Sprintf("Plan restarted from phase %d", startPhase),
+		},
+	}, nil
+}
+
+func (s *Server) handlePlanResume(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		PlanID     string `json:"plan_id"`
+		RevisionID string `json:"revision_id,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.PlanID == "" {
+		return nil, fmt.Errorf("plan_id is required")
+	}
+
+	var blockerCount int
+	blockerQuery := `SELECT COUNT(*) FROM execution_blockers WHERE plan_id = ? AND resolved_at IS NULL`
+	s.db.QueryRow(blockerQuery, params.PlanID).Scan(&blockerCount)
+
+	if blockerCount > 0 {
+		return nil, fmt.Errorf("plan has %d unresolved blockers, resolve them first", blockerCount)
+	}
+
+	if params.RevisionID != "" {
+		applyRevQuery := `UPDATE plan_revisions SET status = 'applied', applied_at = ? WHERE id = ?`
+		s.db.Exec(applyRevQuery, time.Now(), params.RevisionID)
+	}
+
+	resumeQuery := `UPDATE plans SET status = 'in_progress', updated_at = ? WHERE id = ?`
+	s.db.Exec(resumeQuery, time.Now(), params.PlanID)
+
+	return &Response{
+		Result: map[string]interface{}{
+			"id":         params.PlanID,
+			"status":     "in_progress",
+			"resumed_at": time.Now(),
+			"message":    "Plan resumed successfully",
+		},
+	}, nil
+}
+
+func (s *Server) handlePlanBlockers(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		PlanID string `json:"plan_id"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.PlanID == "" {
+		return nil, fmt.Errorf("plan_id is required")
+	}
+
+	query := `SELECT id, checkpoint_id, reason, type, blocked_at, resolved_at 
+	          FROM execution_blockers WHERE plan_id = ? ORDER BY blocked_at DESC`
+
+	rows, err := s.db.Query(query, params.PlanID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query blockers: %w", err)
+	}
+	defer rows.Close()
+
+	var blockers []map[string]interface{}
+	for rows.Next() {
+		var id, checkpointID, reason, blkType string
+		var blockedAt time.Time
+		var resolvedAt *time.Time
+		rows.Scan(&id, &checkpointID, &reason, &blkType, &blockedAt, &resolvedAt)
+
+		blocker := map[string]interface{}{
+			"id":            id,
+			"checkpoint_id": checkpointID,
+			"reason":        reason,
+			"type":          blkType,
+			"blocked_at":    blockedAt,
+			"resolved":      resolvedAt != nil,
+		}
+		if resolvedAt != nil {
+			blocker["resolved_at"] = resolvedAt
+		}
+		blockers = append(blockers, blocker)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"plan_id":  params.PlanID,
+			"blockers": blockers,
+			"count":    len(blockers),
+		},
+	}, nil
+}
+
+func (s *Server) handleCheckpointApprove(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		CheckpointID string `json:"checkpoint_id"`
+		Approver     string `json:"approver,omitempty"`
+		Notes        string `json:"notes,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.CheckpointID == "" {
+		return nil, fmt.Errorf("checkpoint_id is required")
+	}
+
+	var planID string
+	cpQuery := `SELECT plan_id FROM checkpoints WHERE id = ?`
+	s.db.QueryRow(cpQuery, params.CheckpointID).Scan(&planID)
+
+	updateCp := `UPDATE checkpoints SET status = 'approved', can_continue = 1, decided_at = ?, decided_by = ?, feedback = ? WHERE id = ?`
+	s.db.Exec(updateCp, time.Now(), params.Approver, params.Notes, params.CheckpointID)
+
+	resolveBlockers := `UPDATE execution_blockers SET resolved_at = ? WHERE plan_id = ? AND checkpoint_id = ? AND type = 'user_rejection'`
+	s.db.Exec(resolveBlockers, time.Now(), planID, params.CheckpointID)
+
+	recordQuery := `INSERT INTO approval_record (id, plan_id, decision, approver, notes, created_at) VALUES (?, ?, 'approved', ?, ?, ?)`
+	s.db.Exec(recordQuery, generateID("record"), planID, params.Approver, params.Notes, time.Now())
+
+	return &Response{
+		Result: map[string]interface{}{
+			"id":           params.CheckpointID,
+			"decision":     "approved",
+			"can_continue": true,
+			"approved_at":  time.Now(),
+			"approved_by":  params.Approver,
 		},
 	}, nil
 }
