@@ -199,7 +199,6 @@ func CheckSyntaxWithGo(files []*FileChange) []*SyntaxCheckResult {
 }
 
 var trailingWhitespaceRegex = regexp.MustCompile(`[ \t]+$`)
-var duplicateImportRegex = regexp.MustCompile(`(?m)^import (.+)\nimport \1$`)
 
 func CheckFormatting(content string, language string) []*ValidationWarning {
 	var warnings []*ValidationWarning
