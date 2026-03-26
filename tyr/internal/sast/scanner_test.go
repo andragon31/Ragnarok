@@ -24,7 +24,7 @@ func TestScanner_ScanFile_HardcodedSecret(t *testing.T) {
 		},
 		{
 			name:     "AWS access key detected",
-			content:  `awsAccessKey := "AKIATESTEXAMPLE123"`,
+			content:  `awsAccessKey := "AKIATESTEXAMPLEKEY12345"`,
 			expected: 1,
 		},
 		{

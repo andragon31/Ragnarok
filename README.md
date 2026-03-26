@@ -1657,20 +1657,20 @@ sequenceDiagram
 
 ## 7. MCP Tools Catalog
 
-### 7.1 Fenrir Tools (25)
+### 7.1 Fenrir Tools (31)
 
 | Category | Tools |
 |----------|-------|
-| **Memory** | `mem_session_start`, `mem_session_end`, `mem_save`, `mem_find`, `mem_get_observation` |
+| **Memory** | `mem_session_start`, `mem_session_end`, `mem_save`, `mem_find`, `mem_get_observation`, `mem_context`, `mem_timeline`, `mem_stats`, `mem_save_prompt`, `mem_session_checkpoint` |
 | **Specs** | `spec_save`, `spec_list`, `spec_check`, `spec_delta`, `spec_related` |
 | **Intent** | `intent_save`, `intent_verify`, `intent_get` |
 | **Bias** | `bias_report` |
 | **Authority** | `authority_get`, `authority_set` |
-| **Incidents** | `incident_save`, `incident_list`, `incident_resolve`, `conflict_detect` |
-| **Scanner** | `prompt_analyze`, `project_scan`, `project_bootstrap`, `agents_md_get` |
+| **Incidents** | `incident_log`, `incident_save`, `incident_list`, `incident_resolve`, `conflict_list`, `conflict_resolve` |
+| **Scanner** | `prompt_analyze`, `project_scan`, `project_bootstrap`, `agents_md_get`, `skill_generate`, `rules_generate`, `standards_generate` |
 | **Knowledge** | `knowledge_query`, `knowledge_add` |
 
-### 7.2 Hati Tools (42)
+### 7.2 Hati Tools (45)
 
 | Category | Tools |
 |----------|-------|
@@ -1680,32 +1680,35 @@ sequenceDiagram
 | **Agents** | `agent_register_work`, `agent_unregister_work`, `agent_list_work` |
 | **Decisions** | `decision_record`, `decision_get`, `decision_list`, `decision_cancel` |
 | **Quality** | `quality_snapshot`, `spec_impact`, `spec_status`, `plan_completeness`, `plan_quality` |
-| **Feedback** | `feedback_save`, `feedback_list`, `feedback_receive`, `feedback_escalate` |
+| **Feedback** | `feedback_request`, `feedback_save`, `feedback_list`, `feedback_receive`, `feedback_escalate` |
 | **Notifications** | `notification_send`, `notification_list`, `notification_ack` |
 | **Records** | `record_list`, `record_get`, `record_export` |
+| **Learning** | `learning_answer` |
 | **Status** | `hati_status`, `hati_stats`, `hati_commit_info`, `hati_register_commit` |
 
 ### 7.3 Skoll Tools (28)
 
 | Category | Tools |
 |----------|-------|
-| **Skills** | `skill_list`, `skill_load`, `skill_search`, `skill_verify`, `skill_read_file`, `bootstrap_import` |
-| **Rules** | `rule_list`, `rule_check`, `rule_get` |
+| **Skills** | `skill_list`, `skill_load`, `skill_search`, `skill_verify`, `skill_version_check`, `skill_read_file`, `skills_import`, `skills_update`, `bootstrap_import` |
+| **Rules** | `rule_list`, `rule_check`, `rule_get`, `rule_pending`, `rule_promote` |
 | **Agents** | `agent_list`, `agent_activate`, `agent_context`, `agent_handoff` |
-| **Workflows** | `workflow_start`, `workflow_progress`, `workflow_complete` |
-| **RSAW** | `dod_check`, `team_register`, `api_docs_check`, `api_usage_verify` |
+| **Workflows** | `workflow_start`, `workflow_step`, `workflow_status`, `workflow_complete` |
+| **RSAW** | `dod_check`, `team_register`, `team_status`, `api_docs_check` |
+| **Status** | `skoll_status`, `skoll_validate` |
 
-### 7.4 Tyr Tools (21)
+### 7.4 Tyr Tools (23)
 
 | Category | Tools |
 |----------|-------|
 | **Precommit** | `precommit_validate`, `precommit_autofix` |
-| **Packages** | `pkg_check`, `pkg_audit`, `cve_alerts` |
-| **SAST** | `sast_run`, `sast_resolve`, `sast_list` |
-| **Standards** | `standard_run`, `standard_run_all`, `standard_list` |
-| **Scope** | `scope_check`, `scope_violations` |
-| **Secrets** | `secrets_scan`, `secrets_resolve` |
+| **Packages** | `pkg_check`, `pkg_license`, `pkg_audit`, `pkg_audit_snapshot`, `pkg_audit_continuous` |
+| **SAST** | `sast_run`, `sast_findings`, `sast_resolve` |
+| **Standards** | `standard_run`, `standard_run_all`, `standard_list`, `quality_snapshot` |
+| **Scope** | `scope_violations` |
+| **Audit** | `audit_log`, `session_audit` |
 | **Security** | `inject_guard`, `sanitize`, `proactive_scan`, `bootstrap_import` |
+| **Status** | `tyr_stats` |
 
 ---
 
