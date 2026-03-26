@@ -1,0 +1,122 @@
+package database
+
+import (
+	"database/sql"
+	"fmt"
+
+	_ "modernc.org/sqlite"
+)
+
+func NewDB(path string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	return db, nil
+}
+
+func InitSchema(db *sql.DB) error {
+	schema := `
+	CREATE TABLE IF NOT EXISTS skills (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE,
+		description TEXT,
+		license TEXT,
+		compatibility TEXT,
+		framework TEXT,
+		min_version TEXT,
+		max_version TEXT,
+		last_verified DATETIME,
+		source TEXT DEFAULT 'local',
+		tags TEXT,
+		has_scripts INTEGER DEFAULT 0,
+		has_references INTEGER DEFAULT 0,
+		has_assets INTEGER DEFAULT 0,
+		allowed_tools TEXT,
+		path TEXT,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS rules (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		category TEXT NOT NULL,
+		content TEXT NOT NULL,
+		severity TEXT DEFAULT 'medium',
+		scope TEXT DEFAULT 'global',
+		status TEXT DEFAULT 'active',
+		is_active INTEGER DEFAULT 1,
+		source TEXT DEFAULT 'local',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS agents (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE,
+		role TEXT,
+		scope TEXT,
+		skills TEXT,
+		allowed_tools TEXT,
+		is_active INTEGER DEFAULT 0,
+		last_active DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS workflows (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		type TEXT NOT NULL,
+		status TEXT DEFAULT 'started',
+		description TEXT,
+		phases TEXT,
+		standards TEXT,
+		is_active INTEGER DEFAULT 1,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS pending_rules (
+		id TEXT PRIMARY KEY,
+		rule_id TEXT NOT NULL,
+		proposed_by TEXT,
+		reason TEXT,
+		status TEXT DEFAULT 'pending',
+		created_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS team_context (
+		id TEXT PRIMARY KEY,
+		module TEXT NOT NULL UNIQUE,
+		scope TEXT,
+		skills TEXT,
+		rules TEXT,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
+	CREATE INDEX IF NOT EXISTS idx_skills_framework ON skills(framework);
+	CREATE INDEX IF NOT EXISTS idx_skills_source ON skills(source);
+	CREATE INDEX IF NOT EXISTS idx_rules_category ON rules(category);
+	CREATE INDEX IF NOT EXISTS idx_rules_active ON rules(is_active);
+	CREATE INDEX IF NOT EXISTS idx_agents_active ON agents(is_active);
+	CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
+	`
+
+	_, err := db.Exec(schema)
+	if err != nil {
+		return fmt.Errorf("failed to initialize schema: %w", err)
+	}
+
+	return nil
+}

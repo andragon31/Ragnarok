@@ -23,7 +23,7 @@ function Test-Item($name, $condition, $errorMsg) {
 Write-Host @"
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   Ragnarok v1.1.1 - Installation Verification                  ║
+║   Ragnarok v1.2.0 - Installation Verification                  ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
 "@ -ForegroundColor Cyan

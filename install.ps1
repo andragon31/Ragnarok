@@ -1,16 +1,16 @@
-# Ragnarok Installer v1.1.1
+# Ragnarok Installer v1.2.0
 # AI Governance & Memory Layer Ecosystem
 # Usage: 
-#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v1.1.1/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v1.2.0/install.ps1 | iex
 #   Or download and run manually
 
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok",
     [switch]$AddToPath,
-    [switch]$Unattended
+    [switch]$SkipOpenCodeSetup
 )
 
-$VERSION = "1.1.1"
+$VERSION = "1.2.0"
 $REPO_URL = "https://github.com/andragon31/Ragnarok"
 
 # Save script to temp if running from remote (irm | iex)
@@ -20,7 +20,7 @@ if ($MyInvocation.InvocationName -eq "iex") {
     $content | Set-Content $scriptPath -Encoding UTF8
     Write-Host "Script saved to: $scriptPath" -ForegroundColor Yellow
     Write-Host "Running locally...`n" -ForegroundColor Yellow
-    & $scriptPath -InstallDir $InstallDir -AddToPath:$AddToPath -Unattended:$Unattended
+    & $scriptPath -InstallDir $InstallDir -AddToPath:$AddToPath -SkipOpenCodeSetup:$SkipOpenCodeSetup
     Remove-Item $scriptPath -ErrorAction SilentlyContinue
     exit
 }
@@ -69,11 +69,9 @@ Write-Host @"
 Write-Host "`nInstalling Ragnarok v$VERSION..." -ForegroundColor White
 
 $IS_WINDOWS = $env:OS -eq "Windows_NT"
-$IS_LINUX = $env:OSTYPE -eq "linux-gnu"
-$IS_MACOS = $env:OSTYPE -match "darwin"
 
-if (!$IS_WINDOWS -and !$IS_LINUX -and !$IS_MACOS) {
-    Write-Err "Unsupported operating system"
+if (!$IS_WINDOWS) {
+    Write-Err "This installer is for Windows only"
     throw "Unsupported OS"
 }
 
@@ -101,20 +99,7 @@ New-Directory $InstallDir
 Write-Success "Installation directory: $InstallDir"
 
 $BIN_DIR = Join-Path $InstallDir "bin"
-$DATA_DIR = Join-Path $InstallDir "data"
-$FENRIR_DIR = Join-Path $DATA_DIR ".fenrir"
-$HATI_DIR = Join-Path $DATA_DIR ".hati"
-$SKOLL_DIR = Join-Path $DATA_DIR ".skoll"
-$TYR_DIR = Join-Path $DATA_DIR ".tyr"
-
 New-Directory $BIN_DIR
-New-Directory $DATA_DIR
-New-Directory $FENRIR_DIR
-New-Directory $HATI_DIR
-New-Directory $SKOLL_DIR
-New-Directory $TYR_DIR
-
-Write-Success "Data directories created"
 
 Write-Step "3. Cloning repository"
 
@@ -133,117 +118,37 @@ if ($LASTEXITCODE -ne 0) {
     
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Failed to clone repository"
-        Write-Host "Run these commands manually to see the error:" -ForegroundColor Yellow
-        Write-Host "  git clone --depth 1 --branch v$VERSION $REPO_URL" -ForegroundColor Gray
         throw "Git clone failed"
     }
 }
 
 Write-Success "Repository cloned"
 
-Write-Step "4. Building binaries"
+Write-Step "4. Building rag.exe"
 
-$PLUGINS = @(
-    @{Name="fenrir"; Dir="fenrir"; Package="./cmd/fenrir"},
-    @{Name="hati"; Dir="hati"; Package="./cmd/hati"},
-    @{Name="skoll"; Dir="skoll"; Package="./cmd/skoll"},
-    @{Name="tyr"; Dir="tyr"; Package="./cmd/tyr"},
-    @{Name="rag"; Dir="installer"; Package="./cmd/rag"}
-)
+$outFile = Join-Path $BIN_DIR "rag.exe"
+Write-Host "  Building rag.exe..." -NoNewline
 
-$buildSuccess = $true
+Push-Location $TEMP_DIR
+$buildArgs = @("build", "-ldflags=-s -w", "-o", $outFile, "./cmd/rag")
+$buildOutput = & go @buildArgs 2>&1
+Pop-Location
 
-foreach ($plugin in $PLUGINS) {
-    $outFile = Join-Path $BIN_DIR "$($plugin.Name).exe"
-    Write-Host "  Building $($plugin.Name)..." -NoNewline
-    
-    Push-Location $TEMP_DIR
-    $buildArgs = @("build", "-C", $plugin.Dir, "-ldflags=-s -w", "-o", $outFile, $plugin.Package)
-    $buildOutput = & go @buildArgs 2>&1
-    Pop-Location
-    
-    if ($LASTEXITCODE -eq 0 -and (Test-Path $outFile)) {
-        $size = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
-        Write-Success "$($plugin.Name) ($size MB)"
-    } else {
-        Write-Err "$($plugin.Name) failed"
-        if ($buildOutput) { Write-Host $buildOutput -ForegroundColor Gray }
-        $buildSuccess = $false
-    }
+if ($LASTEXITCODE -eq 0 -and (Test-Path $outFile)) {
+    $size = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
+    Write-Success "rag.exe built ($size MB)"
+} else {
+    Write-Err "Build failed"
+    if ($buildOutput) { Write-Host $buildOutput -ForegroundColor Gray }
+    Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
+    throw "Build failed"
 }
 
 Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
 
-if (-not $buildSuccess) {
-    Write-Err "Some binaries failed to build"
-    throw "Build failed"
-}
+Write-Step "5. Adding to PATH"
 
-Write-Step "5. Creating MCP configuration for OpenCode"
-
-$OPENCODE_CONFIG_DIRS = @(
-    "$env:APPDATA\opencode",
-    "$env:LOCALAPPDATA\opencode",
-    "$env:USERPROFILE\.config\opencode"
-)
-
-$opencodeConfigDir = $null
-foreach ($dir in $OPENCODE_CONFIG_DIRS) {
-    if (Test-Path $dir) {
-        $opencodeConfigDir = $dir
-        break
-    }
-}
-
-if (-not $opencodeConfigDir) {
-    $opencodeConfigDir = "$env:USERPROFILE\.config\opencode"
-    New-Directory $opencodeConfigDir
-    Write-Warn "Created OpenCode config directory"
-} else {
-    Write-Success "OpenCode config: $opencodeConfigDir"
-}
-
-$PLUGIN_PORTS = @{
-    "fenrir" = 7437
-    "hati" = 7439
-    "skoll" = 7438
-    "tyr" = 7440
-}
-
-$mcpServers = @{}
-foreach ($entry in $PLUGIN_PORTS.GetEnumerator()) {
-    $mcpServers[$entry.Key] = @{
-        command = @((Join-Path $BIN_DIR "$($entry.Key).exe"), "mcp")
-        enabled = $true
-        type = "local"
-    }
-}
-
-$opencodeConfig = @{ mcp = $mcpServers }
-$opencodeJsonPath = Join-Path $opencodeConfigDir "opencode.json"
-$opencodeJsonContent = $opencodeConfig | ConvertTo-Json -Depth 10
-$opencodeJsonContent | Set-Content $opencodeJsonPath -Encoding UTF8
-
-Write-Success "OpenCode MCP config: $opencodeJsonPath"
-
-Write-Step "6. Verifying installation"
-
-foreach ($plugin in $PLUGINS) {
-    $exePath = Join-Path $BIN_DIR "$($plugin.Name).exe"
-    if (Test-Path $exePath) {
-        $version = & $exePath version 2>$null
-        if ($LASTEXITCODE -eq 0 -and $version) {
-            Write-Success "$($plugin.Name): $version"
-        } else {
-            Write-Warn "$($plugin.Name): installed but failed to respond"
-        }
-    } else {
-        Write-Err "$($plugin.Name): not found"
-    }
-}
-
-Write-Step "7. Adding to PATH"
-
+$ragExe = Join-Path $BIN_DIR "rag.exe"
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 if ($userPath -notlike "*$BIN_DIR*") {
     $newPath = "$userPath;$BIN_DIR"
@@ -251,40 +156,45 @@ if ($userPath -notlike "*$BIN_DIR*") {
     $env:PATH = $newPath
     Write-Success "Added to PATH: $BIN_DIR"
 } else {
-    Write-Success "Already in PATH: $BIN_DIR"
+    Write-Success "Already in PATH"
 }
 
-Write-Step "8. Setting up auto-start on login"
-
-$taskName = "RagnarokServe"
-$ragExe = Join-Path $BIN_DIR "rag.exe"
-$existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-
-if ($existingTask) {
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-    Write-Warn "Removed existing auto-start task"
+if (-not $SkipOpenCodeSetup) {
+    Write-Step "6. Setting up OpenCode MCP integration"
+    
+    try {
+        $setupOutput = & $ragExe setup opencode 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "OpenCode MCP configured"
+        } else {
+            Write-Warn "OpenCode setup skipped (may not be installed)"
+        }
+    } catch {
+        Write-Warn "OpenCode not detected, skipping MCP setup"
+    }
 }
 
-$action = New-ScheduledTaskAction -Execute $ragExe -Argument "serve" -WorkingDirectory $InstallDir
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+Write-Step "7. Verifying installation"
 
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description "Start Ragnarok MCP ecosystem" | Out-Null
-
-Write-Success "Auto-start enabled: Ragnarok will start on login"
+$version = & $ragExe version 2>$null
+if ($LASTEXITCODE -eq 0 -and $version) {
+    Write-Success $version
+} else {
+    Write-Err "rag.exe verification failed"
+}
 
 Write-Host "`n---------------------------------------------------------------" -ForegroundColor Cyan
 Write-Host "  INSTALLATION COMPLETE!" -ForegroundColor Green
 Write-Host "---------------------------------------------------------------`n" -ForegroundColor Cyan
 
-Write-Host "Next steps:`n" -ForegroundColor White
-Write-Host "  1. Open a NEW terminal window" -ForegroundColor Yellow
-Write-Host "  2. Check ecosystem health:" -ForegroundColor White
-Write-Host "     rag stats --ecosystem" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "  3. Servers will auto-start on next login" -ForegroundColor Green
-Write-Host "     To manually start: rag serve" -ForegroundColor Gray
+Write-Host "That's it! OpenCode will automatically use Ragnarok MCP.`n" -ForegroundColor White
+
+Write-Host "Usage:" -ForegroundColor White
+Write-Host "  rag init --project NAME    Initialize plugins for a project" -ForegroundColor Yellow
+Write-Host "  rag scan --path ./project   Scan and bootstrap a project" -ForegroundColor Yellow
+Write-Host "  rag setup opencode         Re-configure OpenCode MCP" -ForegroundColor Yellow
+Write-Host "  rag --help                 Show all commands" -ForegroundColor Yellow
 Write-Host ""
 
-Write-Host "`nDocumentation: https://github.com/andragon31/Ragnarok" -ForegroundColor Gray
+Write-Host "Documentation: https://github.com/andragon31/Ragnarok" -ForegroundColor Gray
 Write-Host ""
