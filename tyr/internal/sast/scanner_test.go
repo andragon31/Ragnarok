@@ -29,7 +29,7 @@ func TestScanner_ScanFile_HardcodedSecret(t *testing.T) {
 		},
 		{
 			name:     "Bearer token detected",
-			content:  `Authorization: Bearer eyJhbGcOiJIUzI1NiIsInR5cCI6IkpXVCJ9`,
+			content:  `Authorization: Bearer SAMPLE_TOKEN_DATA`,
 			expected: 1,
 		},
 		{
@@ -373,7 +373,7 @@ func BenchmarkScanFile(b *testing.B) {
 	import "fmt"
 	
 	func main() {
-		apiKey := "YOUR_API_KEY_HERE"
+		testValue := "SAMPLE_TOKEN_DATA"
 		password := "mysecretpassword"
 		fmt.Println("Hello")
 	}
