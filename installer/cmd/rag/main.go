@@ -697,6 +697,7 @@ func runServe(baseDir string) {
 		cmd := exec.Command(binPath, "serve", "--port", fmt.Sprintf("%d", port), "--dir", dir)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		cmd.Env = append(os.Environ(), "MCP_TRANSPORT=tcp")
 		cmd.Start()
 		processes = append(processes, cmd)
 
