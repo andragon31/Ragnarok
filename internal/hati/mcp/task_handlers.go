@@ -367,7 +367,9 @@ func (s *Server) handleTaskList(ctx context.Context, req *Request) (*Response, e
 		var completedAt sql.NullTime
 		var createdAt time.Time
 
-		rows.Scan(&id, &phaseID, &prdReqID, &title, &status, &priority, &agentID, &agentType, &milestone, &blocker, &completedAt, &createdAt)
+		if err := rows.Scan(&id, &phaseID, &prdReqID, &title, &status, &priority, &agentID, &agentType, &milestone, &blocker, &completedAt, &createdAt); err != nil {
+			continue
+		}
 
 		task := map[string]interface{}{
 			"id":         id.String,
@@ -386,6 +388,9 @@ func (s *Server) handleTaskList(ctx context.Context, req *Request) (*Response, e
 			task["completed_at"] = completedAt.Time
 		}
 		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating tasks: %w", err)
 	}
 
 	return &Response{Result: map[string]interface{}{
@@ -607,7 +612,9 @@ func (s *Server) handleHumanReviewPending(ctx context.Context, req *Request) (*R
 		var status string
 		var createdAt time.Time
 
-		rows.Scan(&id, &reviewType, &entityType, &entityID, &question, &status, &createdAt)
+		if err := rows.Scan(&id, &reviewType, &entityType, &entityID, &question, &status, &createdAt); err != nil {
+			continue
+		}
 
 		reviews = append(reviews, map[string]interface{}{
 			"id":          id.String,
@@ -618,6 +625,9 @@ func (s *Server) handleHumanReviewPending(ctx context.Context, req *Request) (*R
 			"status":      status,
 			"created_at":  createdAt,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating reviews: %w", err)
 	}
 
 	return &Response{Result: map[string]interface{}{
@@ -689,7 +699,9 @@ func (s *Server) handlePRDRequirementsExtract(ctx context.Context, req *Request)
 	for rows.Next() {
 		var id, reqType, priority, title, desc, ac sql.NullString
 		var status string
-		rows.Scan(&id, &reqType, &priority, &title, &desc, &ac, &status)
+		if err := rows.Scan(&id, &reqType, &priority, &title, &desc, &ac, &status); err != nil {
+			continue
+		}
 
 		var acList []string
 		if ac.Valid {
@@ -705,6 +717,9 @@ func (s *Server) handlePRDRequirementsExtract(ctx context.Context, req *Request)
 			"acceptance_criteria": acList,
 			"status":              status,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating requirements: %w", err)
 	}
 
 	return &Response{Result: map[string]interface{}{
@@ -744,9 +759,14 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 	for rows.Next() {
 		var r reqInfo
 		var desc sql.NullString
-		rows.Scan(&r.ID, &r.Type, &r.Priority, &r.Title, &desc)
+		if err := rows.Scan(&r.ID, &r.Type, &r.Priority, &r.Title, &desc); err != nil {
+			continue
+		}
 		r.Description = desc.String
 		requirements = append(requirements, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating requirements: %w", err)
 	}
 
 	defaultPhases := []string{"Setup", "Backend", "Frontend", "Testing", "Deploy"}

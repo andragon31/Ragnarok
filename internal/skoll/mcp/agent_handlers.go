@@ -203,7 +203,9 @@ func (s *Server) handleSpecializedAgentList(ctx context.Context, req *Request) (
 		var lastHeartbeat sql.NullTime
 		var createdAt time.Time
 
-		rows.Scan(&id, &name, &agentType, &role, &scope, &status, &lastHeartbeat, &createdAt)
+		if err := rows.Scan(&id, &name, &agentType, &role, &scope, &status, &lastHeartbeat, &createdAt); err != nil {
+			continue
+		}
 
 		agent := map[string]interface{}{
 			"id":         id.String,
@@ -218,6 +220,9 @@ func (s *Server) handleSpecializedAgentList(ctx context.Context, req *Request) (
 			agent["last_heartbeat"] = lastHeartbeat.Time
 		}
 		agents = append(agents, agent)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating agents: %w", err)
 	}
 
 	return &Response{Result: map[string]interface{}{
@@ -384,17 +389,26 @@ func (s *Server) handleTeamGet(ctx context.Context, req *Request) (*Response, er
 	var createdAt time.Time
 	s.db.QueryRow(`SELECT name, project_path, status, created_at FROM teams WHERE id = ?`, params.TeamID).Scan(&teamName, &projectPath, &status, &createdAt)
 
-	rows, _ := s.db.Query(`SELECT agent_id, role FROM team_members WHERE team_id = ?`, params.TeamID)
+	rows, err := s.db.Query(`SELECT agent_id, role FROM team_members WHERE team_id = ?`, params.TeamID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list team members: %w", err)
+	}
+	defer rows.Close()
+
 	members := []map[string]interface{}{}
 	for rows.Next() {
 		var agentID, role sql.NullString
-		rows.Scan(&agentID, &role)
+		if err := rows.Scan(&agentID, &role); err != nil {
+			continue
+		}
 		members = append(members, map[string]interface{}{
 			"agent_id": agentID.String,
 			"role":     role.String,
 		})
 	}
-	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating team members: %w", err)
+	}
 
 	return &Response{Result: map[string]interface{}{
 		"team_id":      params.TeamID,

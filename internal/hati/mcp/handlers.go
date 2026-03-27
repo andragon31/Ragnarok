@@ -780,7 +780,9 @@ func (s *Server) handlePlanBlockers(ctx context.Context, req *Request) (*Respons
 		var id, checkpointID, reason, blkType string
 		var blockedAt time.Time
 		var resolvedAt *time.Time
-		rows.Scan(&id, &checkpointID, &reason, &blkType, &blockedAt, &resolvedAt)
+		if err := rows.Scan(&id, &checkpointID, &reason, &blkType, &blockedAt, &resolvedAt); err != nil {
+			continue
+		}
 
 		blocker := map[string]interface{}{
 			"id":            id,
@@ -794,6 +796,9 @@ func (s *Server) handlePlanBlockers(ctx context.Context, req *Request) (*Respons
 			blocker["resolved_at"] = resolvedAt
 		}
 		blockers = append(blockers, blocker)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating blockers: %w", err)
 	}
 
 	return &Response{
@@ -896,6 +901,9 @@ func (s *Server) handleRecordList(ctx context.Context, req *Request) (*Response,
 		rec.Approver = approver.String
 		rec.Notes = notes.String
 		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating records: %w", err)
 	}
 
 	return &Response{
@@ -1291,6 +1299,9 @@ func (s *Server) handleNotificationList(ctx context.Context, req *Request) (*Res
 		}
 		notifications = append(notifications, n)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating notifications: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -1356,7 +1367,9 @@ func (s *Server) handlePlanDependencies(ctx context.Context, req *Request) (*Res
 		var deps []map[string]interface{}
 		for rows.Next() {
 			var id, planID, dependsOn, depType, status, depTitle string
-			rows.Scan(&id, &planID, &dependsOn, &depType, &status, &depTitle)
+			if err := rows.Scan(&id, &planID, &dependsOn, &depType, &status, &depTitle); err != nil {
+				continue
+			}
 			deps = append(deps, map[string]interface{}{
 				"id":               id,
 				"plan_id":          planID,
@@ -1365,6 +1378,9 @@ func (s *Server) handlePlanDependencies(ctx context.Context, req *Request) (*Res
 				"status":           status,
 				"depends_on_title": depTitle,
 			})
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("error iterating dependencies: %w", err)
 		}
 
 		return &Response{
@@ -1713,6 +1729,9 @@ func (s *Server) handleAgentListWork(ctx context.Context, req *Request) (*Respon
 		}
 		works = append(works, work)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating works: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -1785,13 +1804,18 @@ func (s *Server) handleCheckpointEscalate(ctx context.Context, req *Request) (*R
 	now := time.Now()
 	if slaID != "" {
 		updateQuery := `UPDATE checkpoint_sla SET escalated_at = ? WHERE id = ?`
-		s.db.Exec(updateQuery, now, slaID)
+		if _, err := s.db.Exec(updateQuery, now, slaID); err != nil {
+			return nil, fmt.Errorf("failed to update SLA escalated_at: %w", err)
+		}
 	}
 
 	var cpTitle string
 	var planID string
 	cpQuery := `SELECT type, plan_id FROM checkpoints WHERE id = ?`
-	s.db.QueryRow(cpQuery, params.CheckpointID).Scan(&cpTitle, &planID)
+	if err := s.db.QueryRow(cpQuery, params.CheckpointID).Scan(&cpTitle, &planID); err != nil {
+		cpTitle = "Unknown"
+		planID = ""
+	}
 
 	if recipients != "" {
 		go s.sendWebhook(recipients, map[string]interface{}{
@@ -1866,6 +1890,9 @@ func (s *Server) handleCheckpointCheckSLA(ctx context.Context, req *Request) (*R
 		}
 
 		expired = append(expired, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating expired checkpoints: %w", err)
 	}
 
 	return &Response{

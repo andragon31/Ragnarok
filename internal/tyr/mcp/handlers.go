@@ -460,6 +460,9 @@ func (s *Server) handleSastFindings(ctx context.Context, req *Request) (*Respons
 		}
 		findings = append(findings, f)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating findings: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -572,6 +575,9 @@ func (s *Server) handleSessionAudit(ctx context.Context, req *Request) (*Respons
 		e.Target = target.String
 		e.Result = result.String
 		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating audit entries: %w", err)
 	}
 
 	return &Response{
@@ -768,6 +774,9 @@ func (s *Server) handleStandardList(ctx context.Context, req *Request) (*Respons
 		}
 		standards = append(standards, st)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating standards: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -834,6 +843,9 @@ func (s *Server) handleScopeViolations(ctx context.Context, req *Request) (*Resp
 			"target":         target,
 			"created_at":     createdAt,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating violations: %w", err)
 	}
 
 	return &Response{

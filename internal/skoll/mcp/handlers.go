@@ -368,6 +368,9 @@ func (s *Server) handleAgentList(ctx context.Context, req *Request) (*Response, 
 		}
 		agents = append(agents, a)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating agents: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -466,6 +469,9 @@ func (s *Server) handleRuleList(ctx context.Context, req *Request) (*Response, e
 		}
 		rules = append(rules, r)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rules: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -494,14 +500,25 @@ func (s *Server) handleRuleCheck(ctx context.Context, req *Request) (*Response, 
 	violations := []map[string]string{}
 	for rows.Next() {
 		var id, name, category, content, severity string
-		rows.Scan(&id, &name, &category, &content, &severity)
+		if err := rows.Scan(&id, &name, &category, &content, &severity); err != nil {
+			continue
+		}
+		violations = append(violations, map[string]string{
+			"id":       id,
+			"name":     name,
+			"category": category,
+			"severity": severity,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rules: %w", err)
 	}
 
 	return &Response{
 		Result: map[string]interface{}{
 			"action":        params.Action,
-			"allowed":       true,
-			"rules_checked": 0,
+			"allowed":       len(violations) == 0,
+			"rules_checked": len(violations),
 			"violations":    violations,
 		},
 	}, nil
@@ -721,10 +738,15 @@ func (s *Server) handleRulePending(ctx context.Context, req *Request) (*Response
 	for rows.Next() {
 		r := &PendingRule{}
 		var proposedBy, reason sql.NullString
-		rows.Scan(&r.ID, &r.RuleID, &proposedBy, &reason, &r.Status, &r.CreatedAt)
+		if err := rows.Scan(&r.ID, &r.RuleID, &proposedBy, &reason, &r.Status, &r.CreatedAt); err != nil {
+			continue
+		}
 		r.ProposedBy = proposedBy.String
 		r.Reason = reason.String
 		rules = append(rules, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating pending rules: %w", err)
 	}
 
 	return &Response{
