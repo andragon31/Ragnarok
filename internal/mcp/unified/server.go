@@ -377,7 +377,7 @@ func getToolInputSchema(name string) string {
 		"workflow_complete":     `{"type":"object","properties":{"id":{"type":"string","description":"Workflow ID"},"result":{"type":"object","description":"Workflow result"}},"required":["id"]}`,
 		"api_docs_check":        `{"type":"object","properties":{"url":{"type":"string","description":"API docs URL"}},"required":["url"]}`,
 		"dod_check":             `{"type":"object","properties":{"plan_id":{"type":"string","description":"Plan ID"}},"required":["plan_id"]}`,
-		"bootstrap_import":      `{"type":"object","properties":{"path":{"type":"string","description":"Bootstrap path"},"plugins":{"type":"array","items":{"type":"string"},"description":"Plugins to import"}},"required":["path"]}`,
+		"bootstrap_import":      `{"type":"object","properties":{"project_path":{"type":"string","description":"Project path"},"plugins":{"type":"array","items":{"type":"string"},"description":"Plugins to import"}},"required":["project_path"]}`,
 	}
 	if schema, ok := schemas[name]; ok {
 		return schema
