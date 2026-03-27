@@ -1,7 +1,7 @@
-# Ragnarok Installer v1.2.0
+# Ragnarok Installer v1.3.0
 # AI Governance & Memory Layer Ecosystem
 # Usage: 
-#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v1.2.0/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v1.3.0/install.ps1 | iex
 #   Or download and run manually
 
 param(
