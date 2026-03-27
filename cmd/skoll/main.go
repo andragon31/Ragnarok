@@ -14,7 +14,7 @@ import (
 	"github.com/andragon31/Ragnarok/internal/skoll/mcp"
 )
 
-var version = "1.2.0"
+var version = "1.3.0"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {

@@ -8,7 +8,7 @@ param(
     [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok"
 )
 
-$VERSION = "1.2.0"
+$VERSION = "1.3.0"
 $REPO_URL = "https://github.com/andragon31/Ragnarok"
 
 # Save script to temp if running from remote (irm | iex)
