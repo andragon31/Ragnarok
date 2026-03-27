@@ -657,7 +657,7 @@ func (s *Server) handleSkollStatus(ctx context.Context, req *Request) (*Response
 			"total_agents":           totalAgents,
 			"active_agents":          activeAgents,
 			"filesystem_skills":      len(skillList),
-			"version":                "1.1.0",
+			"version":                "1.4.0",
 			"progressive_disclosure": true,
 		},
 	}, nil

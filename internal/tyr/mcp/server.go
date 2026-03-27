@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andragon31/Ragnarok/internal/tyr/config"
 	rootmcp "github.com/andragon31/Ragnarok/internal/mcp"
+	"github.com/andragon31/Ragnarok/internal/tyr/config"
 )
 
 type Request = rootmcp.Request
@@ -230,7 +230,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"name":    "Tyr",
-		"version": "1.1.0",
+		"version": "1.4.0",
 		"status":  "running",
 		"mcp":     "/mcp",
 	})

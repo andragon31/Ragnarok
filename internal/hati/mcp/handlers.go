@@ -124,6 +124,9 @@ func (s *Server) handlePlanList(ctx context.Context, req *Request) (*Response, e
 		plan.Description = description.String
 		plans = append(plans, plan)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating plans: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -1055,7 +1058,7 @@ func (s *Server) handleHatiStatus(ctx context.Context, req *Request) (*Response,
 			"total_plans":     totalPlans,
 			"active_plans":    activePlans,
 			"completed_plans": completedPlans,
-			"version":         "1.0.0",
+			"version":         "1.4.0",
 		},
 	}, nil
 }

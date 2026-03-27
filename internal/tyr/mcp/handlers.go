@@ -863,7 +863,7 @@ func (s *Server) handleTyrStats(ctx context.Context, req *Request) (*Response, e
 	return &Response{
 		Result: map[string]interface{}{
 			"status":           "operational",
-			"version":          "1.0.0",
+			"version":          "1.4.0",
 			"total_findings":   totalFindings,
 			"active_findings":  activeFindings,
 			"total_audits":     totalAudits,

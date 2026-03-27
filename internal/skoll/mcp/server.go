@@ -248,7 +248,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"name":    "Skoll",
-		"version": "1.1.0",
+		"version": "1.4.0",
 		"status":  "running",
 		"mcp":     "/mcp",
 	})
