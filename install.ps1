@@ -6,7 +6,6 @@
 
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok",
-    [switch]$AddToPath,
     [switch]$SkipOpenCodeSetup
 )
 
@@ -20,7 +19,7 @@ if ($MyInvocation.InvocationName -eq "iex") {
     $content | Set-Content $scriptPath -Encoding UTF8
     Write-Host "Script saved to: $scriptPath" -ForegroundColor Yellow
     Write-Host "Running locally...`n" -ForegroundColor Yellow
-    & $scriptPath -InstallDir $InstallDir -AddToPath:$AddToPath -SkipOpenCodeSetup:$SkipOpenCodeSetup
+    & $scriptPath -InstallDir $InstallDir -SkipOpenCodeSetup:$SkipOpenCodeSetup
     Remove-Item $scriptPath -ErrorAction SilentlyContinue
     exit
 }
@@ -124,25 +123,35 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Success "Repository cloned"
 
-Write-Step "4. Building rag.exe"
+Write-Step "4. Building all binaries"
 
-$outFile = Join-Path $BIN_DIR "rag.exe"
-Write-Host "  Building rag.exe..." -NoNewline
+$binaries = @("rag", "fenrir", "hati", "skoll", "tyr")
 
 Push-Location $TEMP_DIR
-$buildArgs = @("build", "-ldflags=-s -w", "-o", $outFile, "./cmd/rag")
-$buildOutput = & go @buildArgs 2>&1
-Pop-Location
 
-if ($LASTEXITCODE -eq 0 -and (Test-Path $outFile)) {
-    $size = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
-    Write-Success "rag.exe built ($size MB)"
-} else {
-    Write-Err "Build failed"
-    if ($buildOutput) { Write-Host $buildOutput -ForegroundColor Gray }
-    Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
-    throw "Build failed"
+foreach ($bin in $binaries) {
+    $outFile = Join-Path $BIN_DIR "$bin.exe"
+    Write-Host "  Building $bin.exe..." -NoNewline
+    
+    $cmdPath = "./cmd/$bin"
+    if (-not (Test-Path $cmdPath)) {
+        Write-Warn "Skipped (not found: $cmdPath)"
+        continue
+    }
+    
+    $buildArgs = @("build", "-ldflags=-s -w", "-o", $outFile, $cmdPath)
+    $buildOutput = & go @buildArgs 2>&1
+    
+    if ($LASTEXITCODE -eq 0 -and (Test-Path $outFile)) {
+        $size = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
+        Write-Success "$bin.exe built ($size MB)"
+    } else {
+        Write-Warn "Failed to build $bin.exe"
+        if ($buildOutput) { Write-Host $buildOutput -ForegroundColor Gray }
+    }
 }
+
+Pop-Location
 
 Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -174,7 +183,62 @@ if (-not $SkipOpenCodeSetup) {
     }
 }
 
-Write-Step "7. Verifying installation"
+Write-Step "7. Starting Ragnarok services"
+
+$services = @(
+    @{Name="RagnarokFenrir"; Port=7437; Bin="fenrir.exe"},
+    @{Name="RagnarokSkoll"; Port=7438; Bin="skoll.exe"},
+    @{Name="RagnarokHati"; Port=7439; Bin="hati.exe"},
+    @{Name="RagnarokTyr"; Port=7440; Bin="tyr.exe"}
+)
+
+foreach ($svc in $services) {
+    $exePath = Join-Path $BIN_DIR $svc.Bin
+    
+    if (-not (Test-Path $exePath)) {
+        Write-Warn "$($svc.Bin) not found, skipping service"
+        continue
+    }
+    
+    $taskName = $svc.Name
+    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    
+    if ($existingTask) {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+        Write-Host "  Removed existing task: $taskName" -ForegroundColor Yellow
+    }
+    
+    $action = New-ScheduledTaskAction -Execute $exePath -Argument "serve --port $($svc.Port)" -WorkingDirectory $BIN_DIR
+    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable:$false
+    
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description "Ragnarok $($svc.Bin) server" | Out-Null
+    
+    Write-Success "Service registered: $taskName (port $($svc.Port))"
+}
+
+Write-Step "8. Starting services immediately"
+
+foreach ($svc in $services) {
+    $exePath = Join-Path $BIN_DIR $svc.Bin
+    
+    if (-not (Test-Path $exePath)) {
+        continue
+    }
+    
+    $taskName = $svc.Name
+    
+    try {
+        Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+        Write-Success "Service started: $taskName"
+    } catch {
+        Write-Warn "Could not start $taskName (may already be running)"
+    }
+}
+
+Start-Sleep -Seconds 2
+
+Write-Step "9. Verifying installation"
 
 $version = & $ragExe version 2>$null
 if ($LASTEXITCODE -eq 0 -and $version) {
@@ -187,7 +251,22 @@ Write-Host "`n---------------------------------------------------------------" -
 Write-Host "  INSTALLATION COMPLETE!" -ForegroundColor Green
 Write-Host "---------------------------------------------------------------`n" -ForegroundColor Cyan
 
-Write-Host "That's it! OpenCode will automatically use Ragnarok MCP.`n" -ForegroundColor White
+Write-Host "Services Status:" -ForegroundColor White
+foreach ($svc in $services) {
+    $port = $svc.Port
+    try {
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" -TimeoutSec 2 -ErrorAction SilentlyContinue
+        if ($response.StatusCode -eq 200) {
+            Write-Host "  [OK] $($svc.Bin) - Port $port" -ForegroundColor Green
+        } else {
+            Write-Host "  [WARN] $($svc.Bin) - Port $port (not responding)" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "  [STARTING] $($svc.Bin) - Port $port" -ForegroundColor Yellow
+    }
+}
+
+Write-Host "`nThat's it! OpenCode will automatically use Ragnarok MCP.`n" -ForegroundColor White
 
 Write-Host "Usage:" -ForegroundColor White
 Write-Host "  rag init --project NAME    Initialize plugins for a project" -ForegroundColor Yellow
@@ -195,6 +274,7 @@ Write-Host "  rag scan --path ./project   Scan and bootstrap a project" -Foregro
 Write-Host "  rag setup opencode         Re-configure OpenCode MCP" -ForegroundColor Yellow
 Write-Host "  rag --help                 Show all commands" -ForegroundColor Yellow
 Write-Host ""
+Write-Host "Services will auto-start on every login.`n" -ForegroundColor Gray
 
 Write-Host "Documentation: https://github.com/andragon31/Ragnarok" -ForegroundColor Gray
 Write-Host ""

@@ -777,8 +777,7 @@ func setupCursor() {
 	mcpConfig := map[string]interface{}{
 		"mcpServers": map[string]interface{}{
 			"ragnarok": map[string]interface{}{
-				"command": ragPath,
-				"args":    []string{"mcp"},
+				"command": []string{ragPath, "mcp"},
 			},
 		},
 	}
