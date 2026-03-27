@@ -63,14 +63,51 @@ func InitSchema(db *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS agents (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL UNIQUE,
+		agent_type TEXT,
 		role TEXT,
 		scope TEXT,
 		skills TEXT,
 		allowed_tools TEXT,
+		capabilities TEXT,
+		status TEXT DEFAULT 'idle',
+		current_task TEXT,
 		is_active INTEGER DEFAULT 0,
 		last_active DATETIME,
+		last_heartbeat DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS teams (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		project_path TEXT,
+		status TEXT DEFAULT 'active',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS team_members (
+		id TEXT PRIMARY KEY,
+		team_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		role TEXT DEFAULT 'member',
+		joined_at DATETIME NOT NULL,
+		FOREIGN KEY (team_id) REFERENCES teams(id),
+		FOREIGN KEY (agent_id) REFERENCES agents(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS agent_tasks (
+		id TEXT PRIMARY KEY,
+		agent_id TEXT NOT NULL,
+		task_type TEXT NOT NULL,
+		description TEXT,
+		status TEXT DEFAULT 'pending',
+		result TEXT,
+		error TEXT,
+		started_at DATETIME NOT NULL,
+		completed_at DATETIME,
+		FOREIGN KEY (agent_id) REFERENCES agents(id)
 	);
 
 	CREATE TABLE IF NOT EXISTS workflows (

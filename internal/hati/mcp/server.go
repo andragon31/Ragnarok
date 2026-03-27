@@ -97,6 +97,23 @@ func (s *Server) registerHandlers() {
 	s.handlers["hati_stats"] = s.handleHatiStats
 	s.handlers["hati_commit_info"] = s.handleHatiCommitInfo
 	s.handlers["hati_register_commit"] = s.handleHatiRegisterCommit
+
+	s.handlers["task_create"] = s.handleTaskCreate
+	s.handlers["task_get"] = s.handleTaskGet
+	s.handlers["task_get_next"] = s.handleTaskGetNext
+	s.handlers["task_update"] = s.handleTaskUpdate
+	s.handlers["task_set_blocker"] = s.handleTaskSetBlocker
+	s.handlers["task_list"] = s.handleTaskList
+	s.handlers["phase_create"] = s.handlePhaseCreate
+	s.handlers["phase_update"] = s.handlePhaseUpdate
+	s.handlers["plan_progress"] = s.handlePlanProgress
+	s.handlers["plan_create_from_prd"] = s.handlePlanCreateFromPRD
+	s.handlers["plan_activate"] = s.handlePlanActivate
+	s.handlers["prd_parse"] = s.handlePRDParse
+	s.handlers["prd_requirements_extract"] = s.handlePRDRequirementsExtract
+	s.handlers["human_review_create"] = s.handleHumanReviewCreate
+	s.handlers["human_review_decide"] = s.handleHumanReviewDecide
+	s.handlers["human_review_pending"] = s.handleHumanReviewPending
 }
 
 func (s *Server) HandleRequest(ctx context.Context, raw []byte) ([]byte, error) {

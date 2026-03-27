@@ -1,14 +1,14 @@
-# Ragnarok Installer v1.3.0
+# Ragnarok Installer v1.4.0
 # AI Governance & Memory Layer Ecosystem
 # Usage: 
-#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v1.3.0/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v1.4.0/install.ps1 | iex
 #   Or download and run manually
 
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok"
 )
 
-$VERSION = "1.3.0"
+$VERSION = "1.4.0"
 $REPO_URL = "https://github.com/andragon31/Ragnarok"
 
 # Save script to temp if running from remote (irm | iex)

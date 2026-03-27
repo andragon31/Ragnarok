@@ -204,6 +204,67 @@ func InitSchema(db *sql.DB) error {
 		FOREIGN KEY (phase_id) REFERENCES phases(id)
 	);
 
+	CREATE TABLE IF NOT EXISTS prds (
+		id TEXT PRIMARY KEY,
+		title TEXT NOT NULL,
+		version TEXT DEFAULT '1.0',
+		content TEXT,
+		file_path TEXT,
+		status TEXT DEFAULT 'draft',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS prd_requirements (
+		id TEXT PRIMARY KEY,
+		prd_id TEXT NOT NULL,
+		req_type TEXT NOT NULL,
+		priority TEXT DEFAULT 'medium',
+		title TEXT NOT NULL,
+		description TEXT,
+		acceptance_criteria TEXT,
+		status TEXT DEFAULT 'pending',
+		FOREIGN KEY (prd_id) REFERENCES prds(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS tasks (
+		id TEXT PRIMARY KEY,
+		phase_id TEXT NOT NULL,
+		prd_requirement_id TEXT,
+		title TEXT NOT NULL,
+		description TEXT,
+		status TEXT DEFAULT 'pending',
+		priority INTEGER DEFAULT 0,
+		assigned_agent_id TEXT,
+		assigned_agent_type TEXT,
+		estimated_hours REAL,
+		actual_hours REAL,
+		notes TEXT,
+		blocker TEXT,
+		milestone INTEGER DEFAULT 0,
+		subtasks TEXT,
+		completed_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (phase_id) REFERENCES phases(id),
+		FOREIGN KEY (prd_requirement_id) REFERENCES prd_requirements(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS human_reviews (
+		id TEXT PRIMARY KEY,
+		review_type TEXT NOT NULL,
+		entity_type TEXT NOT NULL,
+		entity_id TEXT NOT NULL,
+		question TEXT,
+		decision TEXT,
+		approver TEXT,
+		notes TEXT,
+		status TEXT DEFAULT 'pending',
+		created_at DATETIME NOT NULL,
+		decided_at DATETIME,
+		FOREIGN KEY (entity_id) REFERENCES plans(id)
+	);
+
 	CREATE TABLE IF NOT EXISTS checkpoint_sla (
 		id TEXT PRIMARY KEY,
 		checkpoint_id TEXT NOT NULL,
@@ -230,6 +291,13 @@ func InitSchema(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_agent_locks_plan ON agent_locks(plan_id);
 	CREATE INDEX IF NOT EXISTS idx_agent_work_plan ON agent_work(plan_id);
 	CREATE INDEX IF NOT EXISTS idx_checkpoint_sla_expires ON checkpoint_sla(expires_at);
+	CREATE INDEX IF NOT EXISTS idx_prds_status ON prds(status);
+	CREATE INDEX IF NOT EXISTS idx_prd_requirements_prd ON prd_requirements(prd_id);
+	CREATE INDEX IF NOT EXISTS idx_tasks_phase ON tasks(phase_id);
+	CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+	CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_agent_id);
+	CREATE INDEX IF NOT EXISTS idx_human_reviews_entity ON human_reviews(entity_type, entity_id);
+	CREATE INDEX IF NOT EXISTS idx_human_reviews_status ON human_reviews(status);
 	`
 
 	_, err := db.Exec(schema)

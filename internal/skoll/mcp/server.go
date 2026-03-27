@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
+	rootmcp "github.com/andragon31/Ragnarok/internal/mcp"
 	"github.com/andragon31/Ragnarok/internal/skoll/config"
 	"github.com/andragon31/Ragnarok/internal/skoll/skills"
-	rootmcp "github.com/andragon31/Ragnarok/internal/mcp"
 )
 
 type Request = rootmcp.Request
@@ -103,6 +103,16 @@ func (s *Server) registerHandlers() {
 	s.handlers["agent_activate"] = s.handleAgentActivate
 	s.handlers["agent_context"] = s.handleAgentContext
 	s.handlers["agent_handoff"] = s.handleAgentHandoff
+
+	s.handlers["agent_create"] = s.handleAgentCreate
+	s.handlers["agent_get"] = s.handleAgentGet
+	s.handlers["agent_specialized_list"] = s.handleSpecializedAgentList
+	s.handlers["agent_assign_task"] = s.handleAgentAssignTask
+	s.handlers["agent_complete_task"] = s.handleAgentCompleteTask
+	s.handlers["agent_heartbeat"] = s.handleAgentHeartbeat
+	s.handlers["agent_skills_get"] = s.handleAgentSkillsGet
+	s.handlers["team_create"] = s.handleTeamCreate
+	s.handlers["team_get"] = s.handleTeamGet
 
 	s.handlers["workflow_start"] = s.handleWorkflowStart
 	s.handlers["workflow_step"] = s.handleWorkflowStep

@@ -45,7 +45,7 @@ lint:
 	$(GO) vet ./...
 
 help:
-	@echo "Ragnarok v1.3.0 - AI Governance & Memory Layer Ecosystem"
+	@echo "Ragnarok v1.4.0 - AI Governance & Memory Layer Ecosystem"
 	@echo ""
 	@echo "Targets:"
 	@echo "  build     Build rag.exe (unified MCP server)"
