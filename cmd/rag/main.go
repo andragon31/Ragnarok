@@ -733,11 +733,10 @@ func setupOpenCode() {
 	}
 
 	mcpConfig := map[string]interface{}{
-		"mcpServers": map[string]interface{}{
+		"mcp": map[string]interface{}{
 			"ragnarok": map[string]interface{}{
 				"type":    "local",
-				"command": ragPath,
-				"args":    []string{"mcp"},
+				"command": []string{ragPath, "mcp"},
 				"enabled": true,
 			},
 		},
@@ -750,8 +749,8 @@ func setupOpenCode() {
 	}
 
 	if existingConfig != nil {
-		if mcpServers, ok := existingConfig["mcpServers"].(map[string]interface{}); ok {
-			mcpServers["ragnarok"] = mcpConfig["mcpServers"].(map[string]interface{})["ragnarok"]
+		if mcpServers, ok := existingConfig["mcp"].(map[string]interface{}); ok {
+			mcpServers["ragnarok"] = mcpConfig["mcp"].(map[string]interface{})["ragnarok"]
 			mcpConfig = existingConfig
 		}
 	}

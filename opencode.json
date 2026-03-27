@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "ragnarok": {
+      "type": "local",
+      "command": ["C:/Users/Andragon/AppData/Local/Ragnarok/bin/rag.exe", "mcp"],
+      "enabled": true
+    }
+  }
+}
