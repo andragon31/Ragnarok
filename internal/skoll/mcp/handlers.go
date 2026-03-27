@@ -633,10 +633,19 @@ func (s *Server) handleWorkflowComplete(ctx context.Context, req *Request) (*Res
 
 func (s *Server) handleSkollStatus(ctx context.Context, req *Request) (*Response, error) {
 	var totalSkills, totalRules, totalAgents, activeAgents int
-	s.db.QueryRow(`SELECT COUNT(*) FROM skills`).Scan(&totalSkills)
-	s.db.QueryRow(`SELECT COUNT(*) FROM rules`).Scan(&totalRules)
-	s.db.QueryRow(`SELECT COUNT(*) FROM agents`).Scan(&totalAgents)
-	s.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE is_active = 1`).Scan(&activeAgents)
+
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM skills`).Scan(&totalSkills); err != nil {
+		totalSkills = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM rules`).Scan(&totalRules); err != nil {
+		totalRules = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM agents`).Scan(&totalAgents); err != nil {
+		totalAgents = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE is_active = 1`).Scan(&activeAgents); err != nil {
+		activeAgents = -1
+	}
 
 	skillList, _ := s.skillLoader.ListSkills()
 

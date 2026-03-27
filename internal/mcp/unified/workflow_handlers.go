@@ -2,6 +2,7 @@ package unified
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -490,4 +491,133 @@ func (s *Server) callTool(ctx context.Context, toolName string, params map[strin
 	}
 
 	return result, nil
+}
+
+func (s *Server) handleEcosystemDiagnose(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		Verbose bool `json:"verbose,omitempty"`
+	}
+	json.Unmarshal(req.Params, &params)
+
+	diagnostics := map[string]interface{}{
+		"version": s.serverVersion,
+		"status":  "healthy",
+		"issues":  []string{},
+	}
+
+	issues := []string{}
+
+	if s.dbPaths == nil {
+		s.dbPaths = make(map[string]string)
+	}
+
+	for name, path := range s.dbPaths {
+		issue := s.checkDatabase(path, name)
+		if issue != "" {
+			issues = append(issues, fmt.Sprintf("%s: %s", name, issue))
+		}
+	}
+
+	stats, _ := s.getDatabaseStats()
+	diagnostics["database_stats"] = stats
+
+	if len(issues) > 0 {
+		diagnostics["status"] = "degraded"
+		diagnostics["issues"] = issues
+	}
+
+	return &Response{
+		Result: diagnostics,
+	}, nil
+}
+
+func (s *Server) checkDatabase(path, label string) string {
+	if path == "" {
+		return "database path not configured"
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return fmt.Sprintf("failed to open: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		return fmt.Sprintf("ping failed: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master").Scan(&count); err != nil {
+		return fmt.Sprintf("query failed: %v", err)
+	}
+
+	return ""
+}
+
+func (s *Server) getDatabaseStats() (map[string]interface{}, error) {
+	stats := map[string]interface{}{}
+
+	fenrirPath := s.dbPaths["fenrir"]
+	if fenrirPath != "" {
+		if db, err := sql.Open("sqlite", fenrirPath); err == nil {
+			defer db.Close()
+			var obs, sessions, specs int
+			db.QueryRow("SELECT COUNT(*) FROM observations").Scan(&obs)
+			db.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&sessions)
+			db.QueryRow("SELECT COUNT(*) FROM specs").Scan(&specs)
+			stats["fenrir"] = map[string]int{
+				"observations": obs,
+				"sessions":     sessions,
+				"specs":        specs,
+			}
+		}
+	}
+
+	hatiPath := s.dbPaths["hati"]
+	if hatiPath != "" {
+		if db, err := sql.Open("sqlite", hatiPath); err == nil {
+			defer db.Close()
+			var plans, phases, tasks int
+			db.QueryRow("SELECT COUNT(*) FROM plans").Scan(&plans)
+			db.QueryRow("SELECT COUNT(*) FROM phases").Scan(&phases)
+			db.QueryRow("SELECT COUNT(*) FROM tasks").Scan(&tasks)
+			stats["hati"] = map[string]int{
+				"plans":  plans,
+				"phases": phases,
+				"tasks":  tasks,
+			}
+		}
+	}
+
+	skollPath := s.dbPaths["skoll"]
+	if skollPath != "" {
+		if db, err := sql.Open("sqlite", skollPath); err == nil {
+			defer db.Close()
+			var skills, rules, agents int
+			db.QueryRow("SELECT COUNT(*) FROM skills").Scan(&skills)
+			db.QueryRow("SELECT COUNT(*) FROM rules").Scan(&rules)
+			db.QueryRow("SELECT COUNT(*) FROM agents").Scan(&agents)
+			stats["skoll"] = map[string]int{
+				"skills": skills,
+				"rules":  rules,
+				"agents": agents,
+			}
+		}
+	}
+
+	tyrPath := s.dbPaths["tyr"]
+	if tyrPath != "" {
+		if db, err := sql.Open("sqlite", tyrPath); err == nil {
+			defer db.Close()
+			var findings, standards int
+			db.QueryRow("SELECT COUNT(*) FROM sast_findings").Scan(&findings)
+			db.QueryRow("SELECT COUNT(*) FROM standards").Scan(&standards)
+			stats["tyr"] = map[string]int{
+				"findings":  findings,
+				"standards": standards,
+			}
+		}
+	}
+
+	return stats, nil
 }

@@ -1038,9 +1038,16 @@ func (s *Server) handleLearningAnswer(ctx context.Context, req *Request) (*Respo
 
 func (s *Server) handleHatiStatus(ctx context.Context, req *Request) (*Response, error) {
 	var totalPlans, activePlans, completedPlans int
-	s.db.QueryRow(`SELECT COUNT(*) FROM plans`).Scan(&totalPlans)
-	s.db.QueryRow(`SELECT COUNT(*) FROM plans WHERE status = 'draft' OR status = 'in_progress'`).Scan(&activePlans)
-	s.db.QueryRow(`SELECT COUNT(*) FROM plans WHERE status = 'completed'`).Scan(&completedPlans)
+
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM plans`).Scan(&totalPlans); err != nil {
+		totalPlans = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM plans WHERE status = 'draft' OR status = 'in_progress'`).Scan(&activePlans); err != nil {
+		activePlans = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM plans WHERE status = 'completed'`).Scan(&completedPlans); err != nil {
+		completedPlans = -1
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -1261,7 +1268,9 @@ func (s *Server) handleNotificationList(ctx context.Context, req *Request) (*Res
 		var id, recipient, notifType, priority, title, message, planID, cpID string
 		var status string
 		var sentAt, createdAt *time.Time
-		rows.Scan(&id, &recipient, &notifType, &priority, &title, &message, &planID, &cpID, &status, &sentAt, &createdAt)
+		if err := rows.Scan(&id, &recipient, &notifType, &priority, &title, &message, &planID, &cpID, &status, &sentAt, &createdAt); err != nil {
+			continue
+		}
 
 		n := map[string]interface{}{
 			"id":         id,
@@ -1685,7 +1694,9 @@ func (s *Server) handleAgentListWork(ctx context.Context, req *Request) (*Respon
 	for rows.Next() {
 		var id, agentID, agentName, planID, phaseID, status string
 		var startedAt, heartbeatAt time.Time
-		rows.Scan(&id, &agentID, &agentName, &planID, &phaseID, &status, &startedAt, &heartbeatAt)
+		if err := rows.Scan(&id, &agentID, &agentName, &planID, &phaseID, &status, &startedAt, &heartbeatAt); err != nil {
+			continue
+		}
 
 		work := map[string]interface{}{
 			"id":           id,
@@ -1833,7 +1844,9 @@ func (s *Server) handleCheckpointCheckSLA(ctx context.Context, req *Request) (*R
 		var slaHours int
 		var createdAt, expiresAt time.Time
 		var escalatedAt *time.Time
-		rows.Scan(&id, &cpID, &slaHours, &recipients, &createdAt, &expiresAt, &escalatedAt, &cpType, &pid)
+		if err := rows.Scan(&id, &cpID, &slaHours, &recipients, &createdAt, &expiresAt, &escalatedAt, &cpType, &pid); err != nil {
+			continue
+		}
 
 		item := map[string]interface{}{
 			"sla_id":        id,

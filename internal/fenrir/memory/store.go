@@ -230,11 +230,21 @@ func (s *MemoryStore) GetRecentObservations(limit int) ([]*Observation, error) {
 func (s *MemoryStore) GetStats() (*Stats, error) {
 	stats := &Stats{}
 
-	s.db.QueryRow(`SELECT COUNT(*) FROM observations`).Scan(&stats.TotalObservations)
-	s.db.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&stats.TotalSessions)
-	s.db.QueryRow(`SELECT COUNT(*) FROM edges`).Scan(&stats.TotalEdges)
-	s.db.QueryRow(`SELECT COUNT(*) FROM specs`).Scan(&stats.TotalSpecs)
-	s.db.QueryRow(`SELECT COUNT(*) FROM incidents WHERE status = 'open'`).Scan(&stats.OpenIncidents)
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM observations`).Scan(&stats.TotalObservations); err != nil {
+		stats.TotalObservations = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&stats.TotalSessions); err != nil {
+		stats.TotalSessions = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM edges`).Scan(&stats.TotalEdges); err != nil {
+		stats.TotalEdges = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM specs`).Scan(&stats.TotalSpecs); err != nil {
+		stats.TotalSpecs = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM incidents WHERE status = 'open'`).Scan(&stats.OpenIncidents); err != nil {
+		stats.OpenIncidents = -1
+	}
 
 	return stats, nil
 }

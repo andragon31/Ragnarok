@@ -823,7 +823,9 @@ func (s *Server) handleScopeViolations(ctx context.Context, req *Request) (*Resp
 	for rows.Next() {
 		var id, sessionID, module, violationType, target string
 		var createdAt time.Time
-		rows.Scan(&id, &sessionID, &module, &violationType, &target, &createdAt)
+		if err := rows.Scan(&id, &sessionID, &module, &violationType, &target, &createdAt); err != nil {
+			continue
+		}
 		violations = append(violations, map[string]interface{}{
 			"id":             id,
 			"session_id":     sessionID,
@@ -844,10 +846,19 @@ func (s *Server) handleScopeViolations(ctx context.Context, req *Request) (*Resp
 
 func (s *Server) handleTyrStats(ctx context.Context, req *Request) (*Response, error) {
 	var totalFindings, activeFindings, totalAudits, scopeViolations int
-	s.db.QueryRow(`SELECT COUNT(*) FROM sast_findings`).Scan(&totalFindings)
-	s.db.QueryRow(`SELECT COUNT(*) FROM sast_findings WHERE status = 'active'`).Scan(&activeFindings)
-	s.db.QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&totalAudits)
-	s.db.QueryRow(`SELECT COUNT(*) FROM scope_violations`).Scan(&scopeViolations)
+
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sast_findings`).Scan(&totalFindings); err != nil {
+		totalFindings = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sast_findings WHERE status = 'active'`).Scan(&activeFindings); err != nil {
+		activeFindings = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&totalAudits); err != nil {
+		totalAudits = -1
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM scope_violations`).Scan(&scopeViolations); err != nil {
+		scopeViolations = -1
+	}
 
 	return &Response{
 		Result: map[string]interface{}{

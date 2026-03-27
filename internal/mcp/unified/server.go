@@ -28,6 +28,7 @@ type Server struct {
 	tools         []Tool
 	serverName    string
 	serverVersion string
+	dbPaths       map[string]string
 }
 
 type Tool struct {
@@ -58,6 +59,7 @@ func NewServer(dataDir string) (*Server, error) {
 		tools:         []Tool{},
 		serverName:    "ragnarok",
 		serverVersion: "1.4.0",
+		dbPaths:       make(map[string]string),
 	}
 
 	s.registerHandlers(dataDir)
@@ -70,6 +72,7 @@ func (s *Server) registerHandlers(dataDir string) {
 	fDB, err := fenrirdb.NewDB(filepath.Join(fCfg.DataDir, "fenrir.db"))
 	if err == nil {
 		fenrirdb.InitSchema(fDB)
+		s.dbPaths["fenrir"] = filepath.Join(fCfg.DataDir, "fenrir.db")
 		fSrv := fenrirmcp.NewServer(fCfg, fDB)
 		for k, v := range fSrv.Handlers() {
 			s.handlers[k] = v
@@ -85,6 +88,7 @@ func (s *Server) registerHandlers(dataDir string) {
 	hDB, err := hatidb.NewDB(hCfg.DBPath())
 	if err == nil {
 		hatidb.InitSchema(hDB)
+		s.dbPaths["hati"] = hCfg.DBPath()
 		hSrv := hatimcp.NewServer(hCfg, hDB)
 		for k, v := range hSrv.Handlers() {
 			s.handlers[k] = v
@@ -100,6 +104,7 @@ func (s *Server) registerHandlers(dataDir string) {
 	skDB, err := skolldb.NewDB(skCfg.DBPath())
 	if err == nil {
 		skolldb.InitSchema(skDB)
+		s.dbPaths["skoll"] = skCfg.DBPath()
 		skSrv := skollmcp.NewServer(skCfg, skDB)
 		for k, v := range skSrv.Handlers() {
 			s.handlers[k] = v
@@ -115,6 +120,7 @@ func (s *Server) registerHandlers(dataDir string) {
 	tDB, err := tyrdb.NewDB(tCfg.DBPath())
 	if err == nil {
 		tyrdb.InitSchema(tDB)
+		s.dbPaths["tyr"] = tCfg.DBPath()
 		tSrv := tyrmcp.NewServer(tCfg, tDB)
 		for k, v := range tSrv.Handlers() {
 			s.handlers[k] = v
@@ -164,6 +170,11 @@ func (s *Server) registerWorkflowHandlers() {
 			desc:   "Create quality checkpoint with human approval",
 			schema: `{"type":"object","properties":{"plan_id":{"type":"string"},"phase_id":{"type":"string"},"description":{"type":"string"}},"required":["plan_id","description"]}`,
 			fn:     s.handleWorkflowCheckpointCreate,
+		},
+		"ecosystem_diagnose": {
+			desc:   "Run ecosystem health diagnostics",
+			schema: `{"type":"object","properties":{"verbose":{"type":"boolean","description":"Show detailed diagnostics"}}}`,
+			fn:     s.handleEcosystemDiagnose,
 		},
 	}
 
@@ -497,19 +508,36 @@ func (s *Server) Run(ctx context.Context) error {
 			default:
 				handler, ok := s.handlers[baseReq.Method]
 				if !ok {
-					continue
-				}
-
-				var req mcp.Request
-				json.Unmarshal(raw, &req)
-				result, err := handler(ctx, &req)
-				if err != nil {
-					continue
-				}
-				resp = map[string]interface{}{
-					"jsonrpc": "2.0",
-					"id":      baseReq.ID,
-					"result":  result,
+					resp = map[string]interface{}{
+						"jsonrpc": "2.0",
+						"id":      baseReq.ID,
+						"error":   map[string]string{"code": "-32601", "message": "Method not found: " + baseReq.Method},
+					}
+				} else {
+					var req mcp.Request
+					if err := json.Unmarshal(raw, &req); err != nil {
+						resp = map[string]interface{}{
+							"jsonrpc": "2.0",
+							"id":      baseReq.ID,
+							"error":   map[string]string{"code": "-32700", "message": "Parse error: " + err.Error()},
+						}
+					} else {
+						result, err := handler(ctx, &req)
+						if err != nil {
+							log.Printf("Handler error for %s: %v", baseReq.Method, err)
+							resp = map[string]interface{}{
+								"jsonrpc": "2.0",
+								"id":      baseReq.ID,
+								"error":   map[string]string{"code": "-32603", "message": "Internal error: " + err.Error()},
+							}
+						} else {
+							resp = map[string]interface{}{
+								"jsonrpc": "2.0",
+								"id":      baseReq.ID,
+								"result":  result,
+							}
+						}
+					}
 				}
 			}
 
