@@ -804,8 +804,7 @@ func setupWindsurf() {
 	mcpConfig := map[string]interface{}{
 		"mcpServers": map[string]interface{}{
 			"ragnarok": map[string]interface{}{
-				"command": ragPath,
-				"args":    []string{"mcp"},
+				"command": []string{ragPath, "mcp"},
 			},
 		},
 	}
@@ -833,8 +832,7 @@ func setupAntigravity() {
 	mcpConfig := map[string]interface{}{
 		"mcpServers": map[string]interface{}{
 			"ragnarok": map[string]interface{}{
-				"command": ragPath,
-				"args":    []string{"mcp"},
+				"command": []string{ragPath, "mcp"},
 			},
 		},
 	}

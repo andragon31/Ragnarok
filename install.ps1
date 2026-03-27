@@ -5,8 +5,7 @@
 #   Or download and run manually
 
 param(
-    [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok",
-    [switch]$SkipOpenCodeSetup
+    [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok"
 )
 
 $VERSION = "1.2.0"
@@ -19,7 +18,7 @@ if ($MyInvocation.InvocationName -eq "iex") {
     $content | Set-Content $scriptPath -Encoding UTF8
     Write-Host "Script saved to: $scriptPath" -ForegroundColor Yellow
     Write-Host "Running locally...`n" -ForegroundColor Yellow
-    & $scriptPath -InstallDir $InstallDir -SkipOpenCodeSetup:$SkipOpenCodeSetup
+    & $scriptPath -InstallDir $InstallDir
     Remove-Item $scriptPath -ErrorAction SilentlyContinue
     exit
 }
@@ -44,12 +43,6 @@ function Write-Err($message) {
 
 function Test-Command($cmd) {
     try { Get-Command $cmd -ErrorAction Stop | Out-Null; return $true } catch { return $false }
-}
-
-function New-Directory($path) {
-    if (!(Test-Path $path)) {
-        New-Item -ItemType Directory -Path $path -Force | Out-Null
-    }
 }
 
 Write-Host @"
@@ -94,13 +87,6 @@ if (Test-Command "git") {
 }
 
 Write-Step "2. Creating installation directory"
-New-Directory $InstallDir
-Write-Success "Installation directory: $InstallDir"
-
-$BIN_DIR = Join-Path $InstallDir "bin"
-New-Directory $BIN_DIR
-
-Write-Step "3. Cloning repository"
 
 $TEMP_DIR = Join-Path $env:TEMP "ragnarok_build_$([guid]::NewGuid().ToString('N').Substring(0,8))"
 Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
@@ -123,41 +109,35 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Success "Repository cloned"
 
-Write-Step "4. Building all binaries"
-
-$binaries = @("rag", "fenrir", "hati", "skoll", "tyr")
+Write-Step "3. Building rag.exe"
 
 Push-Location $TEMP_DIR
 
-foreach ($bin in $binaries) {
-    $outFile = Join-Path $BIN_DIR "$bin.exe"
-    Write-Host "  Building $bin.exe..." -NoNewline
-    
-    $cmdPath = "./cmd/$bin"
-    if (-not (Test-Path $cmdPath)) {
-        Write-Warn "Skipped (not found: $cmdPath)"
-        continue
-    }
-    
-    $buildArgs = @("build", "-ldflags=-s -w", "-o", $outFile, $cmdPath)
-    $buildOutput = & go @buildArgs 2>&1
-    
-    if ($LASTEXITCODE -eq 0 -and (Test-Path $outFile)) {
-        $size = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
-        Write-Success "$bin.exe built ($size MB)"
-    } else {
-        Write-Warn "Failed to build $bin.exe"
-        if ($buildOutput) { Write-Host $buildOutput -ForegroundColor Gray }
-    }
+$BIN_DIR = $InstallDir
+New-Item -ItemType Directory -Path $BIN_DIR -Force | Out-Null
+
+$outFile = Join-Path $BIN_DIR "rag.exe"
+Write-Host "  Building rag.exe..." -NoNewline
+
+$buildArgs = @("build", "-ldflags=-s -w", "-o", $outFile, "./cmd/rag")
+$buildOutput = & go @buildArgs 2>&1
+
+if ($LASTEXITCODE -eq 0 -and (Test-Path $outFile)) {
+    $size = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
+    Write-Success "rag.exe built ($size MB)"
+} else {
+    Write-Err "Failed to build rag.exe"
+    Write-Host $buildOutput -ForegroundColor Gray
+    Pop-Location
+    throw "Build failed"
 }
 
 Pop-Location
 
 Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
 
-Write-Step "5. Adding to PATH"
+Write-Step "4. Adding to PATH"
 
-$ragExe = Join-Path $BIN_DIR "rag.exe"
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 if ($userPath -notlike "*$BIN_DIR*") {
     $newPath = "$userPath;$BIN_DIR"
@@ -168,79 +148,23 @@ if ($userPath -notlike "*$BIN_DIR*") {
     Write-Success "Already in PATH"
 }
 
-if (-not $SkipOpenCodeSetup) {
-    Write-Step "6. Setting up OpenCode MCP integration"
-    
-    try {
-        $setupOutput = & $ragExe setup opencode 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "OpenCode MCP configured"
-        } else {
-            Write-Warn "OpenCode setup skipped (may not be installed)"
-        }
-    } catch {
-        Write-Warn "OpenCode not detected, skipping MCP setup"
+Write-Step "5. Setting up OpenCode MCP integration"
+
+try {
+    $setupOutput = & $outFile setup opencode 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "OpenCode MCP configured"
+    } else {
+        Write-Warn "OpenCode setup skipped (may not be installed)"
+        if ($setupOutput) { Write-Host $setupOutput -ForegroundColor Gray }
     }
+} catch {
+    Write-Warn "OpenCode not detected, skipping MCP setup"
 }
 
-Write-Step "7. Starting Ragnarok services"
+Write-Step "6. Verifying installation"
 
-$services = @(
-    @{Name="RagnarokFenrir"; Port=7437; Bin="fenrir.exe"},
-    @{Name="RagnarokSkoll"; Port=7438; Bin="skoll.exe"},
-    @{Name="RagnarokHati"; Port=7439; Bin="hati.exe"},
-    @{Name="RagnarokTyr"; Port=7440; Bin="tyr.exe"}
-)
-
-foreach ($svc in $services) {
-    $exePath = Join-Path $BIN_DIR $svc.Bin
-    
-    if (-not (Test-Path $exePath)) {
-        Write-Warn "$($svc.Bin) not found, skipping service"
-        continue
-    }
-    
-    $taskName = $svc.Name
-    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    
-    if ($existingTask) {
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-        Write-Host "  Removed existing task: $taskName" -ForegroundColor Yellow
-    }
-    
-    $action = New-ScheduledTaskAction -Execute $exePath -Argument "serve --port $($svc.Port)" -WorkingDirectory $BIN_DIR
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable:$false
-    
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description "Ragnarok $($svc.Bin) server" | Out-Null
-    
-    Write-Success "Service registered: $taskName (port $($svc.Port))"
-}
-
-Write-Step "8. Starting services immediately"
-
-foreach ($svc in $services) {
-    $exePath = Join-Path $BIN_DIR $svc.Bin
-    
-    if (-not (Test-Path $exePath)) {
-        continue
-    }
-    
-    $taskName = $svc.Name
-    
-    try {
-        Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
-        Write-Success "Service started: $taskName"
-    } catch {
-        Write-Warn "Could not start $taskName (may already be running)"
-    }
-}
-
-Start-Sleep -Seconds 2
-
-Write-Step "9. Verifying installation"
-
-$version = & $ragExe version 2>$null
+$version = & $outFile version 2>$null
 if ($LASTEXITCODE -eq 0 -and $version) {
     Write-Success $version
 } else {
@@ -251,22 +175,7 @@ Write-Host "`n---------------------------------------------------------------" -
 Write-Host "  INSTALLATION COMPLETE!" -ForegroundColor Green
 Write-Host "---------------------------------------------------------------`n" -ForegroundColor Cyan
 
-Write-Host "Services Status:" -ForegroundColor White
-foreach ($svc in $services) {
-    $port = $svc.Port
-    try {
-        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" -TimeoutSec 2 -ErrorAction SilentlyContinue
-        if ($response.StatusCode -eq 200) {
-            Write-Host "  [OK] $($svc.Bin) - Port $port" -ForegroundColor Green
-        } else {
-            Write-Host "  [WARN] $($svc.Bin) - Port $port (not responding)" -ForegroundColor Yellow
-        }
-    } catch {
-        Write-Host "  [STARTING] $($svc.Bin) - Port $port" -ForegroundColor Yellow
-    }
-}
-
-Write-Host "`nThat's it! OpenCode will automatically use Ragnarok MCP.`n" -ForegroundColor White
+Write-Host "That's it! OpenCode will automatically use Ragnarok MCP.`n" -ForegroundColor White
 
 Write-Host "Usage:" -ForegroundColor White
 Write-Host "  rag init --project NAME    Initialize plugins for a project" -ForegroundColor Yellow
@@ -274,7 +183,7 @@ Write-Host "  rag scan --path ./project   Scan and bootstrap a project" -Foregro
 Write-Host "  rag setup opencode         Re-configure OpenCode MCP" -ForegroundColor Yellow
 Write-Host "  rag --help                 Show all commands" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "Services will auto-start on every login.`n" -ForegroundColor Gray
+Write-Host "No servers needed! rag mcp runs via stdio like Engram.`n" -ForegroundColor Gray
 
 Write-Host "Documentation: https://github.com/andragon31/Ragnarok" -ForegroundColor Gray
 Write-Host ""
