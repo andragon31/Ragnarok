@@ -55,12 +55,14 @@ func (s *GraphStore) SearchNodes(query string, limit int) ([]*Node, error) {
 	var nodes []*Node
 	for rows.Next() {
 		node := &Node{}
-		var metadata string
-		err := rows.Scan(&node.ID, &node.Label, &node.Type, &node.Content, &metadata, &node.Authority, &node.CreatedAt, &node.UpdatedAt)
+		var metadata, content, authority sql.NullString
+		err := rows.Scan(&node.ID, &node.Label, &node.Type, &content, &metadata, &authority, &node.CreatedAt, &node.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
-		node.Metadata = parseJSON(metadata)
+		node.Content = content.String
+		node.Metadata = parseJSON(metadata.String)
+		node.Authority = authority.String
 		nodes = append(nodes, node)
 	}
 	return nodes, nil
@@ -80,12 +82,14 @@ func (s *GraphStore) GetNeighbors(nodeID string) ([]*Node, error) {
 	var nodes []*Node
 	for rows.Next() {
 		node := &Node{}
-		var metadata string
-		err := rows.Scan(&node.ID, &node.Label, &node.Type, &node.Content, &metadata, &node.Authority, &node.CreatedAt, &node.UpdatedAt)
+		var metadata, content, authority sql.NullString
+		err := rows.Scan(&node.ID, &node.Label, &node.Type, &content, &metadata, &authority, &node.CreatedAt, &node.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
-		node.Metadata = parseJSON(metadata)
+		node.Content = content.String
+		node.Metadata = parseJSON(metadata.String)
+		node.Authority = authority.String
 		nodes = append(nodes, node)
 	}
 	return nodes, nil
@@ -103,7 +107,10 @@ func (s *GraphStore) SearchContext(query string, module string, limit int) ([]*C
 		defer rows.Close()
 		for rows.Next() {
 			r := &ContextResult{}
-			rows.Scan(&r.ID, &r.Type, &r.Content, &r.Module, &r.Authority, &r.CreatedAt)
+			var rModule, authority sql.NullString
+			rows.Scan(&r.ID, &r.Type, &r.Content, &rModule, &authority, &r.CreatedAt)
+			r.Module = rModule.String
+			r.Authority = authority.String
 			results = append(results, r)
 		}
 	}
@@ -117,7 +124,10 @@ func (s *GraphStore) SearchContext(query string, module string, limit int) ([]*C
 		defer rows2.Close()
 		for rows2.Next() {
 			r := &ContextResult{}
-			rows2.Scan(&r.ID, &r.Type, &r.Content, &r.Module, &r.Authority, &r.CreatedAt)
+			var rModule, authority sql.NullString
+			rows2.Scan(&r.ID, &r.Type, &r.Content, &rModule, &authority, &r.CreatedAt)
+			r.Module = rModule.String
+			r.Authority = authority.String
 			results = append(results, r)
 		}
 	}

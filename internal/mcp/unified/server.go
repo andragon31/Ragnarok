@@ -57,7 +57,7 @@ func NewServer(dataDir string) (*Server, error) {
 		handlers:      make(map[string]mcp.ToolHandler),
 		tools:         []Tool{},
 		serverName:    "ragnarok",
-		serverVersion: "1.3.0",
+		serverVersion: "1.4.0",
 	}
 
 	s.registerHandlers(dataDir)

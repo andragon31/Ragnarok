@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -37,9 +38,18 @@ func (s *MemoryStore) ListConflicts(status string, limit int) ([]*Conflict, erro
 	var conflicts []*Conflict
 	for rows.Next() {
 		cf := &Conflict{}
-		err := rows.Scan(&cf.ID, &cf.EntityType, &cf.EntityID, &cf.LocalContent, &cf.RemoteContent, &cf.Resolution, &cf.ResolvedBy, &cf.CreatedAt, &cf.ResolvedAt)
+		var localContent, remoteContent, resolution, resolvedBy sql.NullString
+		var resolvedAt sql.NullTime
+		err := rows.Scan(&cf.ID, &cf.EntityType, &cf.EntityID, &localContent, &remoteContent, &resolution, &resolvedBy, &cf.CreatedAt, &resolvedAt)
 		if err != nil {
 			return nil, err
+		}
+		cf.LocalContent = localContent.String
+		cf.RemoteContent = remoteContent.String
+		cf.Resolution = resolution.String
+		cf.ResolvedBy = resolvedBy.String
+		if resolvedAt.Valid {
+			cf.ResolvedAt = resolvedAt.Time
 		}
 		conflicts = append(conflicts, cf)
 	}
@@ -56,9 +66,18 @@ func (s *MemoryStore) GetConflict(id string) (*Conflict, error) {
 	query := `SELECT id, entity_type, entity_id, local_content, remote_content, resolution, resolved_by, created_at, resolved_at
 			  FROM conflicts WHERE id = ?`
 	cf := &Conflict{}
-	err := s.db.QueryRow(query, id).Scan(&cf.ID, &cf.EntityType, &cf.EntityID, &cf.LocalContent, &cf.RemoteContent, &cf.Resolution, &cf.ResolvedBy, &cf.CreatedAt, &cf.ResolvedAt)
+	var localContent, remoteContent, resolution, resolvedBy sql.NullString
+	var resolvedAt sql.NullTime
+	err := s.db.QueryRow(query, id).Scan(&cf.ID, &cf.EntityType, &cf.EntityID, &localContent, &remoteContent, &resolution, &resolvedBy, &cf.CreatedAt, &resolvedAt)
 	if err != nil {
 		return nil, err
+	}
+	cf.LocalContent = localContent.String
+	cf.RemoteContent = remoteContent.String
+	cf.Resolution = resolution.String
+	cf.ResolvedBy = resolvedBy.String
+	if resolvedAt.Valid {
+		cf.ResolvedAt = resolvedAt.Time
 	}
 	return cf, nil
 }

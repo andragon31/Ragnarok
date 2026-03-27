@@ -135,9 +135,22 @@ func (s *MemoryStore) Search(query string, limit int) ([]*Observation, error) {
 	for rows.Next() {
 		obs := &Observation{}
 		var tags string
-		err := rows.Scan(&obs.ID, &obs.SessionID, &obs.Type, &obs.Content, &obs.Authority, &obs.Module, &obs.File, &obs.Line, &tags, &obs.CreatedAt, &obs.UpdatedAt, &obs.TokenCount)
+		var sessionID, module, file, authority sql.NullString
+		var line sql.NullInt64
+		var tokenCount sql.NullInt64
+		err := rows.Scan(&obs.ID, &sessionID, &obs.Type, &obs.Content, &authority, &module, &file, &line, &tags, &obs.CreatedAt, &obs.UpdatedAt, &tokenCount)
 		if err != nil {
 			return nil, err
+		}
+		obs.SessionID = sessionID.String
+		obs.Module = module.String
+		obs.File = file.String
+		obs.Authority = authority.String
+		if line.Valid {
+			obs.Line = int(line.Int64)
+		}
+		if tokenCount.Valid {
+			obs.TokenCount = int(tokenCount.Int64)
 		}
 		observations = append(observations, obs)
 	}
@@ -157,9 +170,22 @@ func (s *MemoryStore) GetObservationsByModule(module string, limit int) ([]*Obse
 	for rows.Next() {
 		obs := &Observation{}
 		var tags string
-		err := rows.Scan(&obs.ID, &obs.SessionID, &obs.Type, &obs.Content, &obs.Authority, &obs.Module, &obs.File, &obs.Line, &tags, &obs.CreatedAt, &obs.UpdatedAt, &obs.TokenCount)
+		var sessionID, module, file, authority sql.NullString
+		var line sql.NullInt64
+		var tokenCount sql.NullInt64
+		err := rows.Scan(&obs.ID, &sessionID, &obs.Type, &obs.Content, &authority, &module, &file, &line, &tags, &obs.CreatedAt, &obs.UpdatedAt, &tokenCount)
 		if err != nil {
 			return nil, err
+		}
+		obs.SessionID = sessionID.String
+		obs.Module = module.String
+		obs.File = file.String
+		obs.Authority = authority.String
+		if line.Valid {
+			obs.Line = int(line.Int64)
+		}
+		if tokenCount.Valid {
+			obs.TokenCount = int(tokenCount.Int64)
 		}
 		observations = append(observations, obs)
 	}
@@ -179,9 +205,22 @@ func (s *MemoryStore) GetRecentObservations(limit int) ([]*Observation, error) {
 	for rows.Next() {
 		obs := &Observation{}
 		var tags string
-		err := rows.Scan(&obs.ID, &obs.SessionID, &obs.Type, &obs.Content, &obs.Authority, &obs.Module, &obs.File, &obs.Line, &tags, &obs.CreatedAt, &obs.UpdatedAt, &obs.TokenCount)
+		var sessionID, module, file, authority sql.NullString
+		var line sql.NullInt64
+		var tokenCount sql.NullInt64
+		err := rows.Scan(&obs.ID, &sessionID, &obs.Type, &obs.Content, &authority, &module, &file, &line, &tags, &obs.CreatedAt, &obs.UpdatedAt, &tokenCount)
 		if err != nil {
 			return nil, err
+		}
+		obs.SessionID = sessionID.String
+		obs.Module = module.String
+		obs.File = file.String
+		obs.Authority = authority.String
+		if line.Valid {
+			obs.Line = int(line.Int64)
+		}
+		if tokenCount.Valid {
+			obs.TokenCount = int(tokenCount.Int64)
 		}
 		observations = append(observations, obs)
 	}

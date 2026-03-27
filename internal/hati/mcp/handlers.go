@@ -115,10 +115,13 @@ func (s *Server) handlePlanList(ctx context.Context, req *Request) (*Response, e
 	var plans []*Plan
 	for rows.Next() {
 		plan := &Plan{}
-		err := rows.Scan(&plan.ID, &plan.SessionID, &plan.Title, &plan.Description, &plan.Status, &plan.RiskLevel, &plan.CreatedAt, &plan.UpdatedAt)
+		var sessionID, description sql.NullString
+		err := rows.Scan(&plan.ID, &sessionID, &plan.Title, &description, &plan.Status, &plan.RiskLevel, &plan.CreatedAt, &plan.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
+		plan.SessionID = sessionID.String
+		plan.Description = description.String
 		plans = append(plans, plan)
 	}
 
@@ -882,10 +885,13 @@ func (s *Server) handleRecordList(ctx context.Context, req *Request) (*Response,
 	var records []*ApprovalRecord
 	for rows.Next() {
 		rec := &ApprovalRecord{}
-		err := rows.Scan(&rec.ID, &rec.PlanID, &rec.Decision, &rec.Approver, &rec.Notes, &rec.CreatedAt)
+		var approver, notes sql.NullString
+		err := rows.Scan(&rec.ID, &rec.PlanID, &rec.Decision, &approver, &notes, &rec.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
+		rec.Approver = approver.String
+		rec.Notes = notes.String
 		records = append(records, rec)
 	}
 

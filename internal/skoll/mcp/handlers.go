@@ -711,7 +711,10 @@ func (s *Server) handleRulePending(ctx context.Context, req *Request) (*Response
 	var rules []*PendingRule
 	for rows.Next() {
 		r := &PendingRule{}
-		rows.Scan(&r.ID, &r.RuleID, &r.ProposedBy, &r.Reason, &r.Status, &r.CreatedAt)
+		var proposedBy, reason sql.NullString
+		rows.Scan(&r.ID, &r.RuleID, &proposedBy, &reason, &r.Status, &r.CreatedAt)
+		r.ProposedBy = proposedBy.String
+		r.Reason = reason.String
 		rules = append(rules, r)
 	}
 

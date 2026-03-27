@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"database/sql"
 	"time"
 )
 
@@ -24,9 +25,16 @@ func (s *MemoryStore) ListIncidents(module string, status string, limit int) ([]
 	var incidents []*Incident
 	for rows.Next() {
 		inc := &Incident{}
-		err := rows.Scan(&inc.ID, &inc.Module, &inc.Summary, &inc.Severity, &inc.Status, &inc.RelatedSpec, &inc.Solution, &inc.CreatedAt, &inc.ResolvedAt)
+		var relatedSpec, solution sql.NullString
+		var resolvedAt sql.NullTime
+		err := rows.Scan(&inc.ID, &inc.Module, &inc.Summary, &inc.Severity, &inc.Status, &relatedSpec, &solution, &inc.CreatedAt, &resolvedAt)
 		if err != nil {
 			return nil, err
+		}
+		inc.RelatedSpec = relatedSpec.String
+		inc.Solution = solution.String
+		if resolvedAt.Valid {
+			inc.ResolvedAt = resolvedAt.Time
 		}
 		incidents = append(incidents, inc)
 	}

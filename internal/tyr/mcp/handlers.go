@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -449,9 +450,13 @@ func (s *Server) handleSastFindings(ctx context.Context, req *Request) (*Respons
 	var findings []*SASTFinding
 	for rows.Next() {
 		f := &SASTFinding{}
-		err := rows.Scan(&f.ID, &f.RuleID, &f.Severity, &f.File, &f.Line, &f.Message, &f.Status, &f.CreatedAt)
+		var line sql.NullInt64
+		err := rows.Scan(&f.ID, &f.RuleID, &f.Severity, &f.File, &line, &f.Message, &f.Status, &f.CreatedAt)
 		if err != nil {
 			return nil, err
+		}
+		if line.Valid {
+			f.Line = int(line.Int64)
 		}
 		findings = append(findings, f)
 	}
@@ -558,10 +563,14 @@ func (s *Server) handleSessionAudit(ctx context.Context, req *Request) (*Respons
 	var entries []*AuditEntry
 	for rows.Next() {
 		e := &AuditEntry{}
-		err := rows.Scan(&e.ID, &e.SessionID, &e.Tool, &e.ActionType, &e.Target, &e.RiskLevel, &e.Result, &e.CreatedAt)
+		var sessionID, target, result sql.NullString
+		err := rows.Scan(&e.ID, &sessionID, &e.Tool, &e.ActionType, &target, &e.RiskLevel, &result, &e.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
+		e.SessionID = sessionID.String
+		e.Target = target.String
+		e.Result = result.String
 		entries = append(entries, e)
 	}
 
@@ -745,9 +754,17 @@ func (s *Server) handleStandardList(ctx context.Context, req *Request) (*Respons
 	var standards []*Standard
 	for rows.Next() {
 		st := &Standard{}
-		err := rows.Scan(&st.ID, &st.Name, &st.Description, &st.Category, &st.LastResult, &st.PassRate)
+		var description, category, lastResult sql.NullString
+		var passRate sql.NullFloat64
+		err := rows.Scan(&st.ID, &st.Name, &description, &category, &lastResult, &passRate)
 		if err != nil {
 			return nil, err
+		}
+		st.Description = description.String
+		st.Category = category.String
+		st.LastResult = lastResult.String
+		if passRate.Valid {
+			st.PassRate = passRate.Float64
 		}
 		standards = append(standards, st)
 	}
