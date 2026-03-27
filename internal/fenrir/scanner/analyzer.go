@@ -244,49 +244,134 @@ func (a *ProjectAnalyzer) detectStack(analysis *ProjectAnalysis) {
 		return string(content)
 	}
 
-	if has("package.json") {
+	detectFrontend := func() {
+		frontendDirs := []string{
+			"", "frontend", "client", "web", "apps/web", "packages/web", "packages/ui",
+			"ui", "src", "app", "apps/client",
+		}
+
+		scanDir := func(dir string) bool {
+			pkgPath := filepath.Join(a.projectPath, dir, "package.json")
+			if dir == "" {
+				pkgPath = filepath.Join(a.projectPath, "package.json")
+			}
+			content, err := os.ReadFile(pkgPath)
+			if err != nil {
+				return false
+			}
+			contentStr := string(content)
+
+			if hasPrefix(filepath.Join(dir, "app")) || has(filepath.Join(dir, "next.config")) {
+				analysis.Stack.Framework = "next.js"
+				return true
+			}
+			if has(filepath.Join(dir, "nuxt.config")) {
+				analysis.Stack.Framework = "nuxt"
+				return true
+			}
+			if has(filepath.Join(dir, "astro.config")) {
+				analysis.Stack.Framework = "astro"
+				return true
+			}
+			if has(filepath.Join(dir, "svelte.config")) {
+				analysis.Stack.Framework = "sveltekit"
+				return true
+			}
+			if has(filepath.Join(dir, "vite.config")) || has(filepath.Join(dir, "vitest.config")) {
+				if strings.Contains(contentStr, "\"vue\"") || strings.Contains(contentStr, "'vue'") {
+					analysis.Stack.Framework = "vue"
+				} else if strings.Contains(contentStr, "\"react\"") || strings.Contains(contentStr, "'react'") {
+					analysis.Stack.Framework = "react"
+				} else {
+					analysis.Stack.Framework = "vite"
+				}
+				return true
+			}
+			if strings.Contains(contentStr, "next") {
+				analysis.Stack.Framework = "next.js"
+				return true
+			}
+			if strings.Contains(contentStr, "@nuxt/") {
+				analysis.Stack.Framework = "nuxt"
+				return true
+			}
+			if strings.Contains(contentStr, "\"react\"") || strings.Contains(contentStr, "'react'") {
+				analysis.Stack.Framework = "react"
+				return true
+			}
+			if strings.Contains(contentStr, "\"vue\"") || strings.Contains(contentStr, "'vue'") {
+				analysis.Stack.Framework = "vue"
+				return true
+			}
+			if strings.Contains(contentStr, "\"@angular/core\"") {
+				analysis.Stack.Framework = "angular"
+				return true
+			}
+			if strings.Contains(contentStr, "remix") {
+				analysis.Stack.Framework = "remix"
+				return true
+			}
+			if strings.Contains(contentStr, "gatsby") {
+				analysis.Stack.Framework = "gatsby"
+				return true
+			}
+			if strings.Contains(contentStr, "svelte") {
+				analysis.Stack.Framework = "svelte"
+				return true
+			}
+			if strings.Contains(contentStr, "express") {
+				analysis.Stack.Framework = "express"
+				return true
+			}
+			if strings.Contains(contentStr, "fastify") {
+				analysis.Stack.Framework = "fastify"
+				return true
+			}
+			return false
+		}
+
+		for _, dir := range frontendDirs {
+			if dir == "" {
+				if scanDir("") {
+					break
+				}
+			} else {
+				if scanDir(dir) {
+					break
+				}
+			}
+		}
+
+		extCounts := map[string]int{"tsx": 0, "jsx": 0, "vue": 0, "svelte": 0}
+		for _, f := range analysis.RootFiles {
+			lower := strings.ToLower(f)
+			for ext := range extCounts {
+				if strings.HasSuffix(lower, "."+ext) {
+					extCounts[ext]++
+				}
+			}
+		}
+
+		if analysis.Stack.Framework == "" {
+			if extCounts["tsx"] > 0 || extCounts["jsx"] > 0 {
+				analysis.Stack.Framework = "react"
+			} else if extCounts["vue"] > 0 {
+				analysis.Stack.Framework = "vue"
+			} else if extCounts["svelte"] > 0 {
+				analysis.Stack.Framework = "svelte"
+			}
+		}
+	}
+
+	if has("package.json") || hasPrefix("frontend/package.json") || hasPrefix("client/package.json") || hasPrefix("apps/web/package.json") {
 		analysis.Stack.Language = "javascript/typescript"
 		analysis.Stack.PackageMgr = "npm"
 
-		if has("tsconfig.json") {
+		if has("tsconfig.json") || hasPrefix("frontend/tsconfig.json") || hasPrefix("apps/web/tsconfig.json") {
 			analysis.Stack.Language = "typescript"
 		}
 
-		content := readFileContent("package.json")
-
-		if has("next.config.js") || hasPrefix("app/") || has("next-env.d.ts") {
-			analysis.Stack.Framework = "next.js"
-		} else if has("nuxt.config.ts") || has("nuxt.config.js") {
-			analysis.Stack.Framework = "nuxt"
-		} else if has("astro.config.mjs") || has("astro.config.js") || has("astro.config.ts") {
-			analysis.Stack.Framework = "astro"
-		} else if has("svelte.config.js") || has("svelte.config.ts") {
-			analysis.Stack.Framework = "sveltekit"
-		} else if has("vite.config.ts") || has("vite.config.js") || has("vitest.config.ts") {
-			if strings.Contains(content, "vue") {
-				analysis.Stack.Framework = "vue"
-			} else if strings.Contains(content, "react") {
-				analysis.Stack.Framework = "react"
-			} else {
-				analysis.Stack.Framework = "vite"
-			}
-		} else if strings.Contains(content, "react") {
-			analysis.Stack.Framework = "react"
-		} else if strings.Contains(content, "vue") {
-			analysis.Stack.Framework = "vue"
-		} else if strings.Contains(content, "express") {
-			analysis.Stack.Framework = "express"
-		} else if strings.Contains(content, "fastify") {
-			analysis.Stack.Framework = "fastify"
-		} else if strings.Contains(content, "svelte") {
-			analysis.Stack.Framework = "svelte"
-		} else if strings.Contains(content, "@angular/core") {
-			analysis.Stack.Framework = "angular"
-		} else if strings.Contains(content, "remix") {
-			analysis.Stack.Framework = "remix"
-		} else if strings.Contains(content, "gatsby") {
-			analysis.Stack.Framework = "gatsby"
-		}
+		detectFrontend()
 	}
 
 	if has("go.mod") {
@@ -452,14 +537,61 @@ func (a *ProjectAnalyzer) detectArchitecture(analysis *ProjectAnalysis) {
 		return false
 	}
 
-	if hasPrefix("src/api") || hasPrefix("api/") || hasPrefix("cmd/") {
-		analysis.Architecture.HasAPI = true
-		analysis.Architecture.APIFramework = "rest"
+	scanForPatterns := func() {
+		frontendPatterns := []string{
+			"src/", "app/", "pages/", "components/", "views/",
+			"frontend/src/", "frontend/components/", "frontend/pages/",
+			"client/src/", "client/components/", "client/pages/",
+			"web/src/", "web/components/", "web/pages/",
+			"apps/web/src/", "apps/web/components/",
+			"packages/web/src/", "packages/ui/src/",
+			"ui/src/", "ui/components/",
+		}
+
+		reactFiles := []string{}
+		vueFiles := []string{}
+		svelteFiles := []string{}
+
+		for _, f := range analysis.RootFiles {
+			lower := strings.ToLower(f)
+			ext := filepath.Ext(f)
+
+			for _, pattern := range frontendPatterns {
+				if strings.Contains(lower, pattern) {
+					analysis.Architecture.HasFrontend = true
+					break
+				}
+			}
+
+			if ext == ".tsx" || ext == ".jsx" {
+				reactFiles = append(reactFiles, f)
+			} else if ext == ".vue" {
+				vueFiles = append(vueFiles, f)
+			} else if ext == ".svelte" {
+				svelteFiles = append(svelteFiles, f)
+			}
+		}
+
+		if len(reactFiles) > 0 {
+			analysis.Architecture.HasFrontend = true
+			analysis.Architecture.FrontendLib = "react"
+		}
+		if len(vueFiles) > 0 {
+			analysis.Architecture.HasFrontend = true
+			analysis.Architecture.FrontendLib = "vue"
+		}
+		if len(svelteFiles) > 0 {
+			analysis.Architecture.HasFrontend = true
+			analysis.Architecture.FrontendLib = "svelte"
+		}
+
+		if hasPrefix("src/api") || hasPrefix("api/") || hasPrefix("cmd/") || hasPrefix("backend/") || hasPrefix("server/") {
+			analysis.Architecture.HasAPI = true
+			analysis.Architecture.APIFramework = "rest"
+		}
 	}
 
-	if hasPrefix("src/web") || hasPrefix("frontend/") || hasPrefix("app/") {
-		analysis.Architecture.HasFrontend = true
-	}
+	scanForPatterns()
 
 	for _, m := range analysis.Modules {
 		analysis.Architecture.Modules = append(analysis.Architecture.Modules, m.Name)
