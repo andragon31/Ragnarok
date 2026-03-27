@@ -346,7 +346,7 @@ func getToolInputSchema(name string) string {
 		"audit_log":             `{"type":"object","properties":{"limit":{"type":"integer","description":"Max entries"}}}`,
 		"session_audit":         `{"type":"object","properties":{"session_id":{"type":"string","description":"Session ID"}}}`,
 		"inject_guard":          `{"type":"object","properties":{"pattern":{"type":"string","description":"Guard pattern"},"action":{"type":"string","description":"Guard action"}},"required":["pattern"]}`,
-		"proactive_scan":        `{"type":"object","properties":{"path":{"type":"string","description":"Path to scan"}},"required":["path"]}`,
+		"proactive_scan":        `{"type":"object","properties":{"module_path":{"type":"string","description":"Module path to scan"}},"required":["module_path"]}`,
 		"sanitize":              `{"type":"object","properties":{"data":{"type":"string","description":"Data to sanitize"}},"required":["data"]}`,
 		"scope_violations":      `{"type":"object","properties":{"scope":{"type":"string","description":"Scope to check"}}}`,
 		"quality_snapshot":      `{"type":"object","properties":{"module":{"type":"string","description":"Module path"}}}`,
