@@ -117,6 +117,10 @@ func main() {
 	planProject := planCmd.String("project", "", "Project directory (required)")
 	planTitle := planCmd.String("title", "", "Plan title (optional)")
 
+	resetCmd := flag.NewFlagSet("reset", flag.ExitOnError)
+	resetForce := resetCmd.Bool("force", false, "Skip confirmation prompt")
+	resetDBs := resetCmd.String("db", "all", "Databases to reset: all, hati, skoll, fenrir, tyr (comma-separated)")
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
@@ -186,6 +190,9 @@ func main() {
 	case "plan":
 		planCmd.Parse(os.Args[2:])
 		runPlan(*planProject, *planTitle)
+	case "reset":
+		resetCmd.Parse(os.Args[2:])
+		runReset(*resetForce, *resetDBs)
 	case "version":
 		fmt.Printf("Ragnarok v%s\n", version)
 		fmt.Println("AI Governance & Memory Layer Ecosystem")
@@ -566,6 +573,7 @@ Usage:
   rag serve                              Start unified MCP server (stdio)
   rag mcp                                Alias for serve
   rag setup --agent AGENT                Setup MCP for agent (opencode, cursor, windsurf)
+  rag reset                              Reset all databases (DANGER!)
   rag version                            Show version
 
 Project Workflows:
@@ -580,6 +588,10 @@ Execution:
   rag feature --name NAME [--plan ID]  Start new feature
   rag review [--plan ID]               Quality checkpoint review
   rag status [--plan ID]               Show project status
+
+Maintenance:
+  rag reset                             Reset all databases (requires confirmation)
+  rag reset --force                     Reset without confirmation
 
 Quick Setup:
   rag setup opencode     Configure OpenCode (most common)
@@ -1385,6 +1397,66 @@ func getDefaultPhases(stack string) []string {
 	default:
 		return []string{"Setup", "Backend", "Frontend", "Tests", "Deployment"}
 	}
+}
+
+func runReset(force bool, dbList string) {
+	if !force {
+		fmt.Println("⚠️  This will DELETE all Ragnarok databases and data!")
+		fmt.Println("   Datbases affected: hati, skoll, fenrir, tyr")
+		fmt.Println("")
+		fmt.Print("Type 'yes' to confirm: ")
+		var confirm string
+		fmt.Scanln(&confirm)
+		if confirm != "yes" {
+			fmt.Println("Cancelled.")
+			os.Exit(0)
+		}
+	}
+
+	home, _ := os.UserHomeDir()
+	baseDir := home
+
+	databases := map[string]string{
+		"hati":   ".hati/hati.db",
+		"skoll":  ".skoll/skoll.db",
+		"fenrir": ".fenrir/fenrir.db",
+		"tyr":    ".tyr/tyr.db",
+	}
+
+	resetAll := dbList == "all"
+
+	fmt.Printf("\n🔄 Resetting Ragnarok databases...\n\n")
+
+	for name, dbPath := range databases {
+		if !resetAll && !contains(dbList, name) {
+			continue
+		}
+
+		fullPath := filepath.Join(baseDir, dbPath)
+
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			fmt.Printf("  ⏭️  %s: database not found, skipping\n", name)
+			continue
+		}
+
+		if err := os.Remove(fullPath); err != nil {
+			fmt.Printf("  ❌ %s: failed to remove - %v\n", name, err)
+		} else {
+			fmt.Printf("  ✅ %s: deleted\n", name)
+		}
+	}
+
+	fmt.Println("\n✓ Databases reset complete!")
+	fmt.Println("  Restart Ragnarok to create fresh databases.")
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 func getPlanID(result interface{}) string {
