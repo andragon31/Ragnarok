@@ -557,7 +557,7 @@ func runIntegrate(projectPath string) {
 }
 
 func printUsage() {
-	fmt.Println(`Ragnarok v2.1.0 - AI Governance & Memory Layer
+	fmt.Println(`Ragnarok v2.2.2 - AI Governance & Memory Layer
 
 Usage:
   rag project --path DIR [--prd FILE]      Analyze or init project (Recommended)
