@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/andragon31/Ragnarok/internal/fenrir/graph"
@@ -146,9 +147,10 @@ func (s *Server) handleMemFind(ctx context.Context, req *Request) (*Response, er
 	}
 
 	if err != nil {
+		graphErr := err
 		observations, err := store.Search(params.Query, params.Limit)
 		if err != nil {
-			return nil, fmt.Errorf("search failed: %w", err)
+			return nil, fmt.Errorf("graph search failed: %v, fallback search failed: %w", graphErr, err)
 		}
 
 		resultItems := make([]map[string]interface{}, 0, len(observations))
@@ -592,8 +594,11 @@ func (s *Server) handleSpecDelta(ctx context.Context, req *Request) (*Response, 
 }
 
 var idCounter = 0
+var idMutex sync.Mutex
 
 func generateID(prefix string) string {
+	idMutex.Lock()
+	defer idMutex.Unlock()
 	idCounter++
 	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), idCounter)
 }

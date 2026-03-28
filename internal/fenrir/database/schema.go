@@ -20,6 +20,8 @@ func NewDB(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	db.Exec("PRAGMA foreign_keys = ON")
+
 	return db, nil
 }
 

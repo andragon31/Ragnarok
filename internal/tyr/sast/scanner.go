@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -418,8 +419,11 @@ func (s *Scanner) ToJSON(findings []*Finding) string {
 }
 
 var idCounter = 0
+var idMutex sync.Mutex
 
 func generateID(prefix string) string {
+	idMutex.Lock()
+	defer idMutex.Unlock()
 	idCounter++
 	return prefix + "_" + time.Now().Format("20060102150405") + "_" + string(rune('a'+idCounter%26))
 }

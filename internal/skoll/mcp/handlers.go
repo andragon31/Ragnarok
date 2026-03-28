@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -293,6 +294,7 @@ func (s *Server) handleAgentActivate(ctx context.Context, req *Request) (*Respon
 	for _, skillName := range agentSkills {
 		skill, err := s.skillLoader.LoadSkillIndex(skillName)
 		if err != nil {
+			log.Printf("Warning: failed to load skill '%s': %v", skillName, err)
 			continue
 		}
 		for _, tool := range skill.AllowedTools {

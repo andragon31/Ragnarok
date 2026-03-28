@@ -344,8 +344,11 @@ type Feedback struct {
 }
 
 var idCounter = 0
+var idMutex sync.Mutex
 
 func generateID(prefix string) string {
+	idMutex.Lock()
+	defer idMutex.Unlock()
 	idCounter++
 	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), idCounter)
 }

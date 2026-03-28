@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -1540,7 +1541,9 @@ func (s *Server) handlePlanRecover(ctx context.Context, req *Request) (*Response
 
 	insertQuery := `INSERT INTO plan_recovery (id, plan_id, phase_id, agent_id, detected_state, expected_state, modified_files, recovery_needed, created_at) 
 	                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	s.db.Exec(insertQuery, recoveryID, params.PlanID, currentPhase.ID, params.AgentID, recoveryState, "completed", filesJSON, boolToInt(recoveryNeeded), createdAt)
+	if _, err := s.db.Exec(insertQuery, recoveryID, params.PlanID, currentPhase.ID, params.AgentID, recoveryState, "completed", filesJSON, boolToInt(recoveryNeeded), createdAt); err != nil {
+		return nil, fmt.Errorf("failed to insert recovery record: %w", err)
+	}
 
 	result := map[string]interface{}{
 		"plan_id":         params.PlanID,
@@ -1552,7 +1555,7 @@ func (s *Server) handlePlanRecover(ctx context.Context, req *Request) (*Response
 
 	if recoveryNeeded {
 		result["suggested_actions"] = []string{
-			"plan_restart --from-phase " + string(rune('0'+currentPhase.OrderNum)),
+			"plan_restart --from-phase " + strconv.Itoa(currentPhase.OrderNum),
 			"plan_abandon --plan_id " + params.PlanID + " --reason agent_disconnected",
 		}
 		result["message"] = "Recovery needed. Agent appears disconnected or phase is inconsistent."

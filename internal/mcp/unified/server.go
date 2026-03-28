@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	fenrirconfig "github.com/andragon31/Ragnarok/internal/fenrir/config"
 	fenrirdb "github.com/andragon31/Ragnarok/internal/fenrir/database"
@@ -539,7 +540,9 @@ func (s *Server) Run(ctx context.Context) error {
 							"error":   map[string]string{"code": "-32700", "message": "Parse error: " + err.Error()},
 						}
 					} else {
-						result, err := handler(ctx, &req)
+						handlerCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+						defer cancel()
+						result, err := handler(handlerCtx, &req)
 						if err != nil {
 							log.Printf("Handler error for %s: %v", baseReq.Method, err)
 							resp = map[string]interface{}{
