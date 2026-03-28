@@ -1416,38 +1416,35 @@ func runReset(force bool, dbList string) {
 	home, _ := os.UserHomeDir()
 	baseDir := home
 
-	databases := map[string]string{
-		"hati":   ".hati/hati.db",
-		"skoll":  ".skoll/skoll.db",
-		"fenrir": ".fenrir/fenrir.db",
-		"tyr":    ".tyr/tyr.db",
+	folders := map[string]string{
+		"hati":   ".hati",
+		"skoll":  ".skoll",
+		"fenrir": ".fenrir",
+		"tyr":    ".tyr",
 	}
 
 	resetAll := dbList == "all"
 
 	fmt.Printf("\n🔄 Resetting Ragnarok databases...\n\n")
 
-	for name, dbPath := range databases {
+	for name, folder := range folders {
 		if !resetAll && !contains(dbList, name) {
 			continue
 		}
 
-		fullPath := filepath.Join(baseDir, dbPath)
+		fullFolder := filepath.Join(baseDir, folder)
 
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-			fmt.Printf("  ⏭️  %s: database not found, skipping\n", name)
-			continue
-		}
+		os.RemoveAll(fullFolder)
 
-		if err := os.Remove(fullPath); err != nil {
-			fmt.Printf("  ❌ %s: failed to remove - %v\n", name, err)
+		if err := os.MkdirAll(fullFolder, 0755); err != nil {
+			fmt.Printf("  ❌ %s: failed to create folder - %v\n", name, err)
 		} else {
-			fmt.Printf("  ✅ %s: deleted\n", name)
+			fmt.Printf("  ✅ %s: folder reset\n", name)
 		}
 	}
 
 	fmt.Println("\n✓ Databases reset complete!")
-	fmt.Println("  Restart Ragnarok to create fresh databases.")
+	fmt.Println("  Run 'rag serve' or 'rag mcp' to start with fresh databases.")
 }
 
 func contains(s, substr string) bool {
