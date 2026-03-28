@@ -60,19 +60,6 @@ func (s *Server) registerHandlers() {
 	s.handlers["spec_check"] = s.handleSpecCheck
 	s.handlers["spec_delta"] = s.handleSpecDelta
 
-	s.handlers["incident_log"] = s.handleIncidentLog
-	s.handlers["incident_list"] = s.handleIncidentList
-	s.handlers["incident_resolve"] = s.handleIncidentResolve
-
-	s.handlers["conflict_list"] = s.handleConflictList
-	s.handlers["conflict_resolve"] = s.handleConflictResolve
-
-	s.handlers["intent_save"] = s.handleIntentSave
-	s.handlers["intent_verify"] = s.handleIntentVerify
-	s.handlers["intent_get"] = s.handleIntentGet
-
-	s.handlers["bias_report"] = s.handleBiasReport
-
 	s.handlers["project_scan"] = s.handleProjectScan
 	s.handlers["project_bootstrap"] = s.handleProjectBootstrap
 	s.handlers["skill_generate"] = s.handleSkillGenerate

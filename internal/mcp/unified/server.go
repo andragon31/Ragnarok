@@ -199,6 +199,62 @@ func (s *Server) registerWorkflowHandlers() {
 	}
 }
 
+func (s *Server) ExecuteWorkflow(ctx context.Context, workflow string, params map[string]interface{}) (interface{}, error) {
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+
+	req := &Request{
+		Method: workflow,
+		Params: paramsJSON,
+	}
+
+	handler, ok := s.handlers[workflow]
+	if !ok {
+		return nil, fmt.Errorf("workflow not found: %s", workflow)
+	}
+
+	result, err := handler(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if result == nil {
+		return nil, nil
+	}
+
+	return result, nil
+}
+
+func (s *Server) CallTool(ctx context.Context, tool string, params map[string]interface{}) (interface{}, error) {
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+
+	req := &Request{
+		Method: tool,
+		Params: paramsJSON,
+	}
+
+	handler, ok := s.handlers[tool]
+	if !ok {
+		return nil, fmt.Errorf("tool not found: %s", tool)
+	}
+
+	result, err := handler(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if result == nil {
+		return nil, nil
+	}
+
+	return result, nil
+}
+
 func getToolDescription(name string) string {
 	descriptions := map[string]string{
 		"mem_save":              "Save an observation to memory",

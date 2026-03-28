@@ -99,19 +99,10 @@ func (s *Server) registerHandlers() {
 	s.handlers["sast_findings"] = s.handleSastFindings
 	s.handlers["sast_resolve"] = s.handleSastResolve
 
-	s.handlers["audit_log"] = s.handleAuditLog
-	s.handlers["session_audit"] = s.handleSessionAudit
-	s.handlers["inject_guard"] = s.handleInjectGuard
-	s.handlers["proactive_scan"] = s.handleProactiveScan
-	s.handlers["sanitize"] = s.handleSanitize
-
 	s.handlers["standard_run"] = s.handleStandardRun
 	s.handlers["standard_run_all"] = s.handleStandardRunAll
 	s.handlers["standard_list"] = s.handleStandardList
 	s.handlers["quality_snapshot"] = s.handleQualitySnapshot
-
-	s.handlers["scope_violations"] = s.handleScopeViolations
-	s.handlers["tyr_stats"] = s.handleTyrStats
 
 	s.handlers["precommit_validate"] = s.handlePrecommitValidate
 	s.handlers["precommit_autofix"] = s.handlePrecommitAutofix

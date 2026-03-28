@@ -84,6 +84,24 @@ func main() {
 	mcpCmd := flag.NewFlagSet("mcp", flag.ExitOnError)
 	mcpDir := mcpCmd.String("dir", "", "Base directory for plugins (default: ~)")
 
+	newCmd := flag.NewFlagSet("new", flag.ExitOnError)
+	newProject := newCmd.String("project", "", "Project name")
+	newPath := newCmd.String("path", ".", "Project directory")
+	newStack := newCmd.String("stack", "", "Tech stack (go, node, python, java, rust, dotnet)")
+
+	continueCmd := flag.NewFlagSet("continue", flag.ExitOnError)
+	continuePlan := continueCmd.String("plan", "", "Plan ID to resume")
+
+	featureCmd := flag.NewFlagSet("feature", flag.ExitOnError)
+	featureName := featureCmd.String("name", "", "Feature name")
+	featurePlan := featureCmd.String("plan", "", "Parent plan ID")
+
+	reviewCmd := flag.NewFlagSet("review", flag.ExitOnError)
+	reviewPlan := reviewCmd.String("plan", "", "Plan ID for review")
+
+	statusCmd := flag.NewFlagSet("status", flag.ExitOnError)
+	statusPlan := statusCmd.String("plan", "", "Plan ID (default: active)")
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
@@ -129,6 +147,21 @@ func main() {
 		runSetup(agent)
 	case "stop":
 		runStop()
+	case "new":
+		newCmd.Parse(os.Args[2:])
+		runNewProject(*newProject, *newPath, *newStack)
+	case "continue":
+		continueCmd.Parse(os.Args[2:])
+		runContinue(*continuePlan)
+	case "feature":
+		featureCmd.Parse(os.Args[2:])
+		runFeature(*featureName, *featurePlan)
+	case "review":
+		reviewCmd.Parse(os.Args[2:])
+		runReview(*reviewPlan)
+	case "status":
+		statusCmd.Parse(os.Args[2:])
+		runStatus(*statusPlan)
 	case "version":
 		fmt.Printf("Ragnarok v%s\n", version)
 		fmt.Println("AI Governance & Memory Layer Ecosystem")
@@ -493,9 +526,15 @@ func runIntegrate(projectPath string) {
 }
 
 func printUsage() {
-	fmt.Println(`Ragnarok v1.2.0 - AI Governance & Memory Layer
+	fmt.Println(`Ragnarok v2.1.0 - AI Governance & Memory Layer
 
 Usage:
+  rag new --project NAME [--path DIR]     Create new project (Recommended)
+  rag continue --plan ID                  Resume existing project
+  rag feature --name NAME [--plan ID]    Start new feature
+  rag review [--plan ID]                  Quality checkpoint review
+  rag status [--plan ID]                  Show project status
+
   rag init --project NAME [--dir DIR]     Initialize all plugins
   rag scan --path PATH [--bootstrap]      Scan project and bootstrap
   rag install --project NAME [--mcp]     Install Ragnarok
@@ -504,17 +543,18 @@ Usage:
   rag setup --agent AGENT                Setup MCP for agent (opencode, cursor, windsurf)
   rag version                            Show version
 
+Simplified Workflows (Recommended):
+  rag new --project myapi --path ./myapi --stack=go
+  rag continue --plan <plan_id>
+  rag feature --name user-auth --plan <plan_id>
+  rag review --plan <plan_id>
+  rag status
+
 Quick Setup:
   rag setup opencode     Configure OpenCode (most common)
   rag setup cursor       Configure Cursor
   rag setup windsurf     Configure Windsurf
-  rag setup antigravity  Configure Antigravity
-
-Examples:
-  rag init --project my-project
-  rag scan --path ./myproject
-  rag setup opencode
-  rag serve`)
+  rag setup antigravity  Configure Antigravity`)
 }
 
 func runInit(projectName, baseDir string) {
@@ -842,6 +882,287 @@ func setupAntigravity() {
 
 	fmt.Printf("✓ Antigravity configured: %s\n", configPath)
 	fmt.Println("  Restart Antigravity to use Ragnarok MCP")
+}
+
+func runNewProject(projectName, projectPath, stack string) {
+	if projectName == "" {
+		fmt.Println("Error: --project is required")
+		fmt.Println("Example: rag new --project myapi --path ./myapi --stack=go")
+		os.Exit(1)
+	}
+
+	absPath, _ := filepath.Abs(projectPath)
+	fmt.Printf("Ragnarok New - Creating new project\n")
+	fmt.Printf("Project: %s\n", projectName)
+	fmt.Printf("Path: %s\n", absPath)
+	fmt.Printf("Stack: %s\n", stack)
+	fmt.Println(strings.Repeat("─", 50))
+
+	srv, err := unified.NewServer("")
+	if err != nil {
+		fmt.Printf("Error initializing unified server: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+	result, err := srv.ExecuteWorkflow(ctx, "workflow_stack_based_init", map[string]interface{}{
+		"project_path": absPath,
+		"title":        projectName,
+		"phases":       getDefaultPhases(stack),
+	})
+
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printWorkflowResult("new", result)
+
+	fmt.Println("\n✓ Project created successfully!")
+	fmt.Println("\nNext steps:")
+	fmt.Printf("  rag continue --plan %s  # To start development\n", getPlanID(result))
+}
+
+func runContinue(planID string) {
+	if planID == "" {
+		planID = getActivePlanID()
+		if planID == "" {
+			fmt.Println("Error: No active plan found. Use --plan to specify a plan ID")
+			os.Exit(1)
+		}
+	}
+
+	fmt.Printf("Ragnarok Continue - Resuming project\n")
+	fmt.Printf("Plan: %s\n", planID)
+	fmt.Println(strings.Repeat("─", 50))
+
+	srv, err := unified.NewServer("")
+	if err != nil {
+		fmt.Printf("Error initializing unified server: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+	result, err := srv.ExecuteWorkflow(ctx, "workflow_plan_develop_v2", map[string]interface{}{
+		"plan_id":       planID,
+		"auto_continue": false,
+	})
+
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printWorkflowResult("continue", result)
+
+	fmt.Printf("\n✓ Development session completed\n")
+	fmt.Printf("Plan progress: %s\n", getPlanProgress(result))
+}
+
+func runFeature(featureName, planID string) {
+	if featureName == "" {
+		fmt.Println("Error: --name is required")
+		fmt.Println("Example: rag feature --name user-auth --plan <plan_id>")
+		os.Exit(1)
+	}
+
+	if planID == "" {
+		planID = getActivePlanID()
+	}
+
+	fmt.Printf("Ragnarok Feature - Starting new feature\n")
+	fmt.Printf("Feature: %s\n", featureName)
+	fmt.Printf("Plan: %s\n", planID)
+	fmt.Println(strings.Repeat("─", 50))
+
+	srv, err := unified.NewServer("")
+	if err != nil {
+		fmt.Printf("Error initializing unified server: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+	phaseResult, err := srv.ExecuteWorkflow(ctx, "phase_create", map[string]interface{}{
+		"plan_id":   planID,
+		"title":     "Feature: " + featureName,
+		"order_num": 99,
+	})
+
+	if err != nil {
+		fmt.Printf("Error creating feature phase: %v\n", err)
+		os.Exit(1)
+	}
+
+	phaseID := getPhaseID(phaseResult)
+
+	taskResult, _ := srv.ExecuteWorkflow(ctx, "task_create", map[string]interface{}{
+		"phase_id":    phaseID,
+		"title":       featureName,
+		"description": "Implement feature: " + featureName,
+		"priority":    5,
+		"milestone":   true,
+	})
+
+	fmt.Println("\n✓ Feature created!")
+	fmt.Printf("Phase ID: %s\n", phaseID)
+	fmt.Printf("Task ID: %s\n", getTaskID(taskResult))
+	fmt.Println("\nNext steps:")
+	fmt.Println("  rag continue --plan " + planID)
+}
+
+func runReview(planID string) {
+	if planID == "" {
+		planID = getActivePlanID()
+	}
+
+	fmt.Printf("Ragnarok Review - Quality checkpoint\n")
+	fmt.Printf("Plan: %s\n", planID)
+	fmt.Println(strings.Repeat("─", 50))
+
+	srv, err := unified.NewServer("")
+	if err != nil {
+		fmt.Printf("Error initializing unified server: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+	result, err := srv.ExecuteWorkflow(ctx, "workflow_checkpoint_create", map[string]interface{}{
+		"plan_id":     planID,
+		"description": "Manual quality review",
+	})
+
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printWorkflowResult("review", result)
+
+	fmt.Println("\n✓ Review checkpoint created!")
+	fmt.Println("Waiting for human approval...")
+}
+
+func runStatus(planID string) {
+	if planID == "" {
+		planID = getActivePlanID()
+	}
+
+	fmt.Printf("Ragnarok Status\n")
+	if planID != "" {
+		fmt.Printf("Plan: %s\n", planID)
+	}
+	fmt.Println(strings.Repeat("─", 50))
+
+	srv, err := unified.NewServer("")
+	if err != nil {
+		fmt.Printf("Error initializing unified server: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+
+	fmt.Println("\n📊 Ecosystem Status:")
+	diag, _ := srv.ExecuteWorkflow(ctx, "ecosystem_diagnose", map[string]interface{}{"verbose": false})
+	printWorkflowResult("diagnose", diag)
+
+	if planID != "" {
+		fmt.Println("\n📋 Plan Progress:")
+		progress, _ := srv.ExecuteWorkflow(ctx, "plan_progress", map[string]interface{}{"plan_id": planID})
+		printWorkflowResult("progress", progress)
+
+		fmt.Println("\n📝 Recent Tasks:")
+		tasks, _ := srv.ExecuteWorkflow(ctx, "task_list", map[string]interface{}{"plan_id": planID, "limit": 5})
+		printWorkflowResult("tasks", tasks)
+	}
+
+	fmt.Println("\n✓ Status check complete")
+}
+
+func getDefaultPhases(stack string) []string {
+	switch strings.ToLower(stack) {
+	case "go":
+		return []string{"Setup", "Backend API", "Models", "Handlers", "Middleware", "Tests", "Documentation"}
+	case "node", "javascript", "typescript":
+		return []string{"Setup", "Backend API", "Routes", "Middleware", "Frontend", "Tests", "Deployment"}
+	case "python":
+		return []string{"Setup", "Backend API", "Models", "Routes", "Tests", "Documentation"}
+	case "java":
+		return []string{"Setup", "Backend API", "Services", "Repositories", "Tests", "Deployment"}
+	case "rust":
+		return []string{"Setup", "Backend API", "Models", "Error Handling", "Tests", "Documentation"}
+	case "dotnet", "csharp":
+		return []string{"Setup", "Backend API", "Services", "Data Access", "Tests", "Deployment"}
+	default:
+		return []string{"Setup", "Backend", "Frontend", "Tests", "Deployment"}
+	}
+}
+
+func getPlanID(result interface{}) string {
+	if m, ok := result.(map[string]interface{}); ok {
+		if id, ok := m["plan_id"].(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
+func getPhaseID(result interface{}) string {
+	if m, ok := result.(map[string]interface{}); ok {
+		if id, ok := m["id"].(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
+func getTaskID(result interface{}) string {
+	if m, ok := result.(map[string]interface{}); ok {
+		if id, ok := m["id"].(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
+func getPlanProgress(result interface{}) string {
+	if m, ok := result.(map[string]interface{}); ok {
+		if progress, ok := m["progress"].(map[string]interface{}); ok {
+			if pct, ok := progress["percent"].(float64); ok {
+				return fmt.Sprintf("%.0f%%", pct)
+			}
+		}
+	}
+	return "unknown"
+}
+
+func getActivePlanID() string {
+	srv, err := unified.NewServer("")
+	if err != nil {
+		return ""
+	}
+	ctx := context.Background()
+	result, err := srv.ExecuteWorkflow(ctx, "plan_list", map[string]interface{}{"status": "active"})
+	if err != nil {
+		return ""
+	}
+	return getPlanID(result)
+}
+
+func printWorkflowResult(workflow string, result interface{}) {
+	if result == nil {
+		return
+	}
+	if m, ok := result.(map[string]interface{}); ok {
+		if status, ok := m["status"].(string); ok {
+			fmt.Printf("Status: %s\n", status)
+		}
+		if msg, ok := m["message"].(string); ok && msg != "" {
+			fmt.Printf("Message: %s\n", msg)
+		}
+		if steps, ok := m["steps"].([]interface{}); ok {
+			fmt.Printf("Steps completed: %d\n", len(steps))
+		}
+	}
 }
 
 func runStop() {

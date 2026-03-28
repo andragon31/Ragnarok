@@ -1,7 +1,11 @@
 package unified
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
+
+	rootmcp "github.com/andragon31/Ragnarok/internal/mcp"
 )
 
 func TestWorkflowStackBasedInitParams(t *testing.T) {
@@ -428,5 +432,204 @@ func TestWorkflowPRDAnalyzeParams(t *testing.T) {
 				t.Errorf("params=%v: expected wantErr=%v, got %v", tt.params, tt.wantErr, hasErr)
 			}
 		})
+	}
+}
+
+func TestExecuteWorkflowNotFound(t *testing.T) {
+	srv := &Server{
+		handlers: make(map[string]rootmcp.ToolHandler),
+	}
+
+	ctx := context.Background()
+	_, err := srv.ExecuteWorkflow(ctx, "nonexistent_workflow", map[string]interface{}{})
+
+	if err == nil {
+		t.Error("Expected error for nonexistent workflow, got nil")
+	}
+}
+
+func TestExecuteWorkflowFound(t *testing.T) {
+	srv := &Server{
+		handlers: map[string]rootmcp.ToolHandler{
+			"test_workflow": func(ctx context.Context, req *Request) (*Response, error) {
+				return &Response{
+					Result: map[string]interface{}{
+						"status":  "success",
+						"message": "test passed",
+					},
+				}, nil
+			},
+		},
+	}
+
+	ctx := context.Background()
+	result, err := srv.ExecuteWorkflow(ctx, "test_workflow", map[string]interface{}{"key": "value"})
+
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected result, got nil")
+	}
+}
+
+func TestCallToolNotFound(t *testing.T) {
+	srv := &Server{
+		handlers: make(map[string]rootmcp.ToolHandler),
+	}
+
+	ctx := context.Background()
+	_, err := srv.CallTool(ctx, "nonexistent_tool", map[string]interface{}{})
+
+	if err == nil {
+		t.Error("Expected error for nonexistent tool, got nil")
+	}
+}
+
+func TestCallToolFound(t *testing.T) {
+	srv := &Server{
+		handlers: map[string]rootmcp.ToolHandler{
+			"test_tool": func(ctx context.Context, req *Request) (*Response, error) {
+				return &Response{
+					Result: map[string]interface{}{
+						"tool": "test_tool",
+						"ran":  true,
+					},
+				}, nil
+			},
+		},
+	}
+
+	ctx := context.Background()
+	result, err := srv.CallTool(ctx, "test_tool", map[string]interface{}{"param": "value"})
+
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected result, got nil")
+	}
+}
+
+func TestExecuteWorkflowParamsPassedCorrectly(t *testing.T) {
+	paramsReceived := make(map[string]interface{})
+
+	srv := &Server{
+		handlers: map[string]rootmcp.ToolHandler{
+			"params_test": func(ctx context.Context, req *Request) (*Response, error) {
+				json.Unmarshal(req.Params, &paramsReceived)
+				return &Response{Result: paramsReceived}, nil
+			},
+		},
+	}
+
+	ctx := context.Background()
+	testParams := map[string]interface{}{
+		"string_param": "hello",
+		"int_param":    42,
+		"bool_param":   true,
+		"array_param":  []string{"a", "b", "c"},
+	}
+
+	_, err := srv.ExecuteWorkflow(ctx, "params_test", testParams)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if paramsReceived["string_param"] != "hello" {
+		t.Errorf("string_param mismatch: got %v", paramsReceived["string_param"])
+	}
+}
+
+func TestExecuteWorkflowWithEmptyParams(t *testing.T) {
+	paramsReceived := false
+
+	srv := &Server{
+		handlers: map[string]rootmcp.ToolHandler{
+			"empty_params": func(ctx context.Context, req *Request) (*Response, error) {
+				if len(req.Params) == 0 || string(req.Params) == "{}" {
+					paramsReceived = true
+				}
+				return &Response{Result: map[string]interface{}{"received": paramsReceived}}, nil
+			},
+		},
+	}
+
+	ctx := context.Background()
+	_, err := srv.ExecuteWorkflow(ctx, "empty_params", map[string]interface{}{})
+
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if !paramsReceived {
+		t.Error("Expected params to be received as empty object")
+	}
+}
+
+func TestCallToolParamsPassedCorrectly(t *testing.T) {
+	paramsReceived := make(map[string]interface{})
+
+	srv := &Server{
+		handlers: map[string]rootmcp.ToolHandler{
+			"tool_params": func(ctx context.Context, req *Request) (*Response, error) {
+				json.Unmarshal(req.Params, &paramsReceived)
+				return &Response{Result: paramsReceived}, nil
+			},
+		},
+	}
+
+	ctx := context.Background()
+	testParams := map[string]interface{}{
+		"project_path": "/test/project",
+		"title":        "Test Plan",
+	}
+
+	_, err := srv.CallTool(ctx, "tool_params", testParams)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if paramsReceived["project_path"] != "/test/project" {
+		t.Errorf("project_path mismatch: got %v", paramsReceived["project_path"])
+	}
+}
+
+func TestExecuteWorkflowReturnsNil(t *testing.T) {
+	srv := &Server{
+		handlers: map[string]rootmcp.ToolHandler{
+			"nil_result": func(ctx context.Context, req *Request) (*Response, error) {
+				return nil, nil
+			},
+		},
+	}
+
+	ctx := context.Background()
+	result, err := srv.ExecuteWorkflow(ctx, "nil_result", map[string]interface{}{})
+
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Errorf("Expected nil result, got %v", result)
+	}
+}
+
+func TestCallToolReturnsNil(t *testing.T) {
+	srv := &Server{
+		handlers: map[string]rootmcp.ToolHandler{
+			"nil_tool": func(ctx context.Context, req *Request) (*Response, error) {
+				return nil, nil
+			},
+		},
+	}
+
+	ctx := context.Background()
+	result, err := srv.CallTool(ctx, "nil_tool", map[string]interface{}{})
+
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Errorf("Expected nil result, got %v", result)
 	}
 }

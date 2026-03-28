@@ -114,33 +114,11 @@ func (s *Server) registerHandlers() {
 	s.handlers["team_create"] = s.handleTeamCreate
 	s.handlers["team_get"] = s.handleTeamGet
 
-	s.handlers["workflow_start"] = s.handleWorkflowStart
-	s.handlers["workflow_step"] = s.handleWorkflowStep
-	s.handlers["workflow_status"] = s.handleWorkflowStatus
-	s.handlers["workflow_complete"] = s.handleWorkflowComplete
-	s.handlers["workflow_deprecate"] = s.handleWorkflowDeprecate
-
-	s.handlers["task_execute"] = s.handleTaskExecute
-	s.handlers["task_delegate"] = s.handleTaskDelegate
-	s.handlers["task_status"] = s.handleTaskStatus
-	s.handlers["task_heartbeat"] = s.handleTaskHeartbeat
-	s.handlers["task_complete"] = s.handleTaskComplete
-	s.handlers["task_cancel"] = s.handleTaskCancel
-
 	s.handlers["skoll_status"] = s.handleSkollStatus
 	s.handlers["skoll_validate"] = s.handleSkollValidate
 
-	s.handlers["rule_pending"] = s.handleRulePending
-	s.handlers["rule_promote"] = s.handleRulePromote
-
-	s.handlers["team_status"] = s.handleTeamStatus
-	s.handlers["team_register"] = s.handleTeamRegister
-
-	s.handlers["dod_check"] = s.handleDodCheck
-
 	s.handlers["skills_import"] = s.handleSkillsImport
 	s.handlers["skills_update"] = s.handleSkillsUpdate
-	s.handlers["api_docs_check"] = s.handleApiDocsCheck
 	s.handlers["bootstrap_import"] = s.handleBootstrapImport
 }
 

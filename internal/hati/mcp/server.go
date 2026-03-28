@@ -51,58 +51,27 @@ func (s *Server) registerHandlers() {
 	s.handlers["plan_revise"] = s.handlePlanRevise
 	s.handlers["plan_abandon"] = s.handlePlanAbandon
 	s.handlers["plan_complete"] = s.handlePlanComplete
-	s.handlers["plan_completeness"] = s.handlePlanCompleteness
-	s.handlers["plan_quality"] = s.handlePlanQuality
-	s.handlers["plan_restart"] = s.handlePlanRestart
 	s.handlers["plan_resume"] = s.handlePlanResume
 	s.handlers["plan_blockers"] = s.handlePlanBlockers
-	s.handlers["plan_recover"] = s.handlePlanRecover
 	s.handlers["plan_dependencies"] = s.handlePlanDependencies
-	s.handlers["plan_lock"] = s.handlePlanLock
-	s.handlers["plan_unlock"] = s.handlePlanUnlock
-	s.handlers["agent_register_work"] = s.handleAgentRegisterWork
-	s.handlers["agent_unregister_work"] = s.handleAgentUnregisterWork
-	s.handlers["agent_list_work"] = s.handleAgentListWork
 
 	s.handlers["checkpoint_open"] = s.handleCheckpointOpen
-	s.handlers["checkpoint_decide"] = s.handleCheckpointDecide
-	s.handlers["checkpoint_status"] = s.handleCheckpointStatus
 	s.handlers["checkpoint_approve"] = s.handleCheckpointApprove
-	s.handlers["checkpoint_set_sla"] = s.handleCheckpointSetSLA
-	s.handlers["checkpoint_escalate"] = s.handleCheckpointEscalate
-	s.handlers["checkpoint_check_sla"] = s.handleCheckpointCheckSLA
 
 	s.handlers["phase_start"] = s.handlePhaseStart
 	s.handlers["phase_report"] = s.handlePhaseReport
 
-	s.handlers["feedback_request"] = s.handleFeedbackRequest
-	s.handlers["feedback_receive"] = s.handleFeedbackReceive
-	s.handlers["feedback_escalate"] = s.handleFeedbackEscalate
-
 	s.handlers["notification_send"] = s.handleNotificationSend
 	s.handlers["notification_list"] = s.handleNotificationList
-	s.handlers["notification_ack"] = s.handleNotificationAck
 
-	s.handlers["record_list"] = s.handleRecordList
-	s.handlers["record_get"] = s.handleRecordGet
-	s.handlers["record_export"] = s.handleRecordExport
-
-	s.handlers["module_hints"] = s.handleModuleHints
 	s.handlers["spec_impact"] = s.handleSpecImpact
 
 	s.handlers["quality_snapshot"] = s.handleQualitySnapshot
-	s.handlers["learning_answer"] = s.handleLearningAnswer
-
-	s.handlers["hati_status"] = s.handleHatiStatus
-	s.handlers["hati_stats"] = s.handleHatiStats
-	s.handlers["hati_commit_info"] = s.handleHatiCommitInfo
-	s.handlers["hati_register_commit"] = s.handleHatiRegisterCommit
 
 	s.handlers["task_create"] = s.handleTaskCreate
 	s.handlers["task_get"] = s.handleTaskGet
 	s.handlers["task_get_next"] = s.handleTaskGetNext
 	s.handlers["task_update"] = s.handleTaskUpdate
-	s.handlers["task_set_blocker"] = s.handleTaskSetBlocker
 	s.handlers["task_list"] = s.handleTaskList
 	s.handlers["phase_create"] = s.handlePhaseCreate
 	s.handlers["phase_update"] = s.handlePhaseUpdate
