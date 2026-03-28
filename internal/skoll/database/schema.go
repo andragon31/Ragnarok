@@ -3,6 +3,8 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -176,6 +178,27 @@ func InitSchema(db *sql.DB) error {
 	_, err := db.Exec(schema)
 	if err != nil {
 		return fmt.Errorf("failed to initialize schema: %w", err)
+	}
+
+	if err := runMigrations(db); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	return nil
+}
+
+func runMigrations(db *sql.DB) error {
+	migrations := []string{
+		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS capabilities TEXT`,
+		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_type TEXT`,
+		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS allowed_tools TEXT`,
+	}
+
+	for _, migration := range migrations {
+		_, err := db.Exec(migration)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			log.Printf("Migration warning: %v", err)
+		}
 	}
 
 	return nil
