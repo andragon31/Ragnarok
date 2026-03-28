@@ -3,6 +3,8 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -133,5 +135,53 @@ func InitSchema(db *sql.DB) error {
 		return fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
+	if err := runMigrations(db); err != nil {
+		log.Printf("Tyr migrations warning: %v", err)
+	}
+
 	return nil
+}
+
+func runMigrations(db *sql.DB) error {
+	migrations := []struct {
+		table  string
+		column string
+		addSQL string
+	}{
+		{"pkg_cache", "typosquatting_risk", `ALTER TABLE pkg_cache ADD COLUMN typosquatting_risk INTEGER DEFAULT 0`},
+	}
+
+	for _, m := range migrations {
+		if !columnExists(db, m.table, m.column) {
+			_, err := db.Exec(m.addSQL)
+			if err != nil && !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
+				log.Printf("Migration warning for %s.%s: %v", m.table, m.column, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func columnExists(db *sql.DB, table, column string) bool {
+	query := fmt.Sprintf("PRAGMA table_info(%s)", table)
+	rows, err := db.Query(query)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt_value interface{}
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt_value, &pk); err != nil {
+			continue
+		}
+		if name == column {
+			return true
+		}
+	}
+	return false
 }
