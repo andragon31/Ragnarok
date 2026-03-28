@@ -358,6 +358,7 @@ func runMigrations(db *sql.DB) error {
 		column string
 		addSQL string
 	}{
+		{"tasks", "assigned_agent_ids", `ALTER TABLE tasks ADD COLUMN assigned_agent_ids TEXT`},
 		{"tasks", "assigned_agent_type", `ALTER TABLE tasks ADD COLUMN assigned_agent_type TEXT`},
 		{"tasks", "blocker", `ALTER TABLE tasks ADD COLUMN blocker TEXT`},
 		{"task_agents", "started_at", `ALTER TABLE task_agents ADD COLUMN started_at DATETIME`},

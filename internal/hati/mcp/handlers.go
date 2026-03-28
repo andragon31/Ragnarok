@@ -105,9 +105,20 @@ func (s *Server) handlePlanList(ctx context.Context, req *Request) (*Response, e
 		params.Limit = 50
 	}
 
-	query := `SELECT id, session_id, title, description, status, risk_level, created_at, updated_at
-			  FROM plans WHERE (? = '' OR status = ?) ORDER BY created_at DESC LIMIT ?`
-	rows, err := s.db.Query(query, params.Status, params.Status, params.Limit)
+	var query string
+	var args []interface{}
+
+	if params.Status == "" || params.Status == "all" {
+		query = `SELECT id, session_id, title, description, status, risk_level, created_at, updated_at
+				FROM plans ORDER BY created_at DESC LIMIT ?`
+		args = []interface{}{params.Limit}
+	} else {
+		query = `SELECT id, session_id, title, description, status, risk_level, created_at, updated_at
+				FROM plans WHERE status = ? ORDER BY created_at DESC LIMIT ?`
+		args = []interface{}{params.Status, params.Limit}
+	}
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list plans: %w", err)
 	}
