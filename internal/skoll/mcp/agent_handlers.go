@@ -256,7 +256,9 @@ func (s *Server) handleAgentAssignTask(ctx context.Context, req *Request) (*Resp
 	taskQuery := `INSERT INTO agent_tasks (id, agent_id, task_type, description, status, started_at)
 				  VALUES (?, ?, 'development', '', 'in_progress', ?)`
 	taskExecID := generateID("agent_task")
-	s.db.Exec(taskQuery, taskExecID, params.AgentID, now)
+	if _, err := s.db.Exec(taskQuery, taskExecID, params.AgentID, now); err != nil {
+		return nil, fmt.Errorf("failed to create task record: %w", err)
+	}
 
 	return &Response{Result: map[string]interface{}{
 		"agent_id":     params.AgentID,
@@ -281,14 +283,18 @@ func (s *Server) handleAgentCompleteTask(ctx context.Context, req *Request) (*Re
 
 	now := time.Now()
 	query := `UPDATE agents SET current_task = '', status = 'idle', last_heartbeat = ?, updated_at = ? WHERE id = ?`
-	s.db.Exec(query, now, now, params.AgentID)
+	if _, err := s.db.Exec(query, now, now, params.AgentID); err != nil {
+		return nil, fmt.Errorf("failed to update agent status: %w", err)
+	}
 
 	taskQuery := `UPDATE agent_tasks SET status = ?, result = ?, error = ?, completed_at = ? WHERE id = ?`
 	status := "completed"
 	if params.Error != "" {
 		status = "failed"
 	}
-	s.db.Exec(taskQuery, status, params.Result, params.Error, now, params.ExecutionID)
+	if _, err := s.db.Exec(taskQuery, status, params.Result, params.Error, now, params.ExecutionID); err != nil {
+		return nil, fmt.Errorf("failed to update task status: %w", err)
+	}
 
 	return &Response{Result: map[string]interface{}{
 		"agent_id":     params.AgentID,
@@ -330,10 +336,14 @@ func (s *Server) handleAgentSkillsGet(ctx context.Context, req *Request) (*Respo
 	}
 
 	var skillsJSON string
-	s.db.QueryRow(`SELECT skills FROM agents WHERE id = ?`, params.AgentID).Scan(&skillsJSON)
+	if err := s.db.QueryRow(`SELECT skills FROM agents WHERE id = ?`, params.AgentID).Scan(&skillsJSON); err != nil {
+		return nil, fmt.Errorf("failed to get agent skills: %w", err)
+	}
 
 	var skills []string
-	json.Unmarshal([]byte(skillsJSON), &skills)
+	if err := json.Unmarshal([]byte(skillsJSON), &skills); err != nil {
+		return nil, fmt.Errorf("failed to parse skills JSON: %w", err)
+	}
 
 	return &Response{Result: map[string]interface{}{
 		"agent_id": params.AgentID,
@@ -364,7 +374,9 @@ func (s *Server) handleTeamCreate(ctx context.Context, req *Request) (*Response,
 
 	for _, agentID := range params.AgentIDs {
 		memberQuery := `INSERT INTO team_members (team_id, agent_id, role, joined_at) VALUES (?, ?, 'member', ?)`
-		s.db.Exec(memberQuery, teamID, agentID, now)
+		if _, err := s.db.Exec(memberQuery, teamID, agentID, now); err != nil {
+			return nil, fmt.Errorf("failed to add team member: %w", err)
+		}
 	}
 
 	return &Response{Result: map[string]interface{}{
@@ -387,7 +399,9 @@ func (s *Server) handleTeamGet(ctx context.Context, req *Request) (*Response, er
 
 	var teamName, projectPath, status sql.NullString
 	var createdAt time.Time
-	s.db.QueryRow(`SELECT name, project_path, status, created_at FROM teams WHERE id = ?`, params.TeamID).Scan(&teamName, &projectPath, &status, &createdAt)
+	if err := s.db.QueryRow(`SELECT name, project_path, status, created_at FROM teams WHERE id = ?`, params.TeamID).Scan(&teamName, &projectPath, &status, &createdAt); err != nil {
+		return nil, fmt.Errorf("failed to get team: %w", err)
+	}
 
 	rows, err := s.db.Query(`SELECT agent_id, role FROM team_members WHERE team_id = ?`, params.TeamID)
 	if err != nil {

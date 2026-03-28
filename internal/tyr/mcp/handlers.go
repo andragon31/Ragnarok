@@ -94,10 +94,14 @@ func (s *Server) handlePkgCheck(ctx context.Context, req *Request) (*Response, e
 	}
 
 	expiresAt := time.Now().Add(24 * time.Hour)
-	s.db.Exec(`DELETE FROM pkg_cache WHERE ecosystem = ? AND name = ?`, params.Ecosystem, params.Name)
+	if _, err := s.db.Exec(`DELETE FROM pkg_cache WHERE ecosystem = ? AND name = ?`, params.Ecosystem, params.Name); err != nil {
+		return nil, fmt.Errorf("failed to clear package cache: %w", err)
+	}
 	query := `INSERT INTO pkg_cache (ecosystem, name, version, exists_pkg, trusted, cve_count, age_days, downloads, typosquatting_risk, cached_at, expires_at)
 			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	s.db.Exec(query, params.Ecosystem, params.Name, params.Version, info.Exists, info.Trusted, cveCount, info.AgeDays, info.DownloadsMonthly, typosquattingRisk, time.Now(), expiresAt)
+	if _, err := s.db.Exec(query, params.Ecosystem, params.Name, params.Version, info.Exists, info.Trusted, cveCount, info.AgeDays, info.DownloadsMonthly, typosquattingRisk, time.Now(), expiresAt); err != nil {
+		return nil, fmt.Errorf("failed to cache package: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{

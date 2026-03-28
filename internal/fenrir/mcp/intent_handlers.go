@@ -142,8 +142,12 @@ func (s *Server) handleBiasReport(ctx context.Context, req *Request) (*Response,
 	reports := make([]map[string]interface{}, 0)
 
 	var totalDecisions, totalIncidents int
-	s.db.QueryRow(`SELECT COUNT(*) FROM observations WHERE type = 'decision'`).Scan(&totalDecisions)
-	s.db.QueryRow(`SELECT COUNT(*) FROM incidents`).Scan(&totalIncidents)
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM observations WHERE type = 'decision'`).Scan(&totalDecisions); err != nil {
+		return nil, fmt.Errorf("failed to count decisions: %w", err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM incidents`).Scan(&totalIncidents); err != nil {
+		return nil, fmt.Errorf("failed to count incidents: %w", err)
+	}
 
 	if stats.TotalSessions > 0 {
 		decisionRatio := float64(totalDecisions) / float64(stats.TotalSessions)
@@ -170,8 +174,12 @@ func (s *Server) handleBiasReport(ctx context.Context, req *Request) (*Response,
 	}
 
 	var recentCount, totalCount int
-	s.db.QueryRow(`SELECT COUNT(*) FROM observations WHERE created_at > datetime('now', '-30 days')`).Scan(&recentCount)
-	s.db.QueryRow(`SELECT COUNT(*) FROM observations`).Scan(&totalCount)
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM observations WHERE created_at > datetime('now', '-30 days')`).Scan(&recentCount); err != nil {
+		return nil, fmt.Errorf("failed to count recent observations: %w", err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM observations`).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("failed to count observations: %w", err)
+	}
 
 	if totalCount > 0 && recentCount > 0 {
 		recentRatio := float64(recentCount) / float64(totalCount)
@@ -186,8 +194,12 @@ func (s *Server) handleBiasReport(ctx context.Context, req *Request) (*Response,
 	}
 
 	var exploratoryCount, authoritativeCount int
-	s.db.QueryRow(`SELECT COUNT(*) FROM observations WHERE authority = 'exploratory'`).Scan(&exploratoryCount)
-	s.db.QueryRow(`SELECT COUNT(*) FROM observations WHERE authority = 'authoritative'`).Scan(&authoritativeCount)
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM observations WHERE authority = 'exploratory'`).Scan(&exploratoryCount); err != nil {
+		return nil, fmt.Errorf("failed to count exploratory observations: %w", err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM observations WHERE authority = 'authoritative'`).Scan(&authoritativeCount); err != nil {
+		return nil, fmt.Errorf("failed to count authoritative observations: %w", err)
+	}
 
 	if exploratoryCount > authoritativeCount*5 {
 		reports = append(reports, map[string]interface{}{

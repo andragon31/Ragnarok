@@ -298,7 +298,9 @@ func (s *Server) handleTaskSetBlocker(ctx context.Context, req *Request) (*Respo
 			 FROM tasks t JOIN phases ph ON t.phase_id = ph.id JOIN plans p ON ph.plan_id = p.id
 			 WHERE t.id = ?`
 	blockerID := generateID("blocker")
-	s.db.Exec(query, blockerID, params.Blocker, now, params.TaskID)
+	if _, err := s.db.Exec(query, blockerID, params.Blocker, now, params.TaskID); err != nil {
+		return nil, fmt.Errorf("failed to set task blocker: %w", err)
+	}
 
 	return &Response{Result: map[string]interface{}{
 		"task_id": params.TaskID,
@@ -472,12 +474,16 @@ func (s *Server) handlePlanProgress(ctx context.Context, req *Request) (*Respons
 			  JOIN phases ph ON t.phase_id = ph.id 
 			  WHERE ph.plan_id = ?`
 	var total, completed int
-	s.db.QueryRow(query, params.PlanID).Scan(&total)
+	if err := s.db.QueryRow(query, params.PlanID).Scan(&total); err != nil {
+		return nil, fmt.Errorf("failed to count tasks: %w", err)
+	}
 
 	query = `SELECT COUNT(*) FROM tasks t 
 			JOIN phases ph ON t.phase_id = ph.id 
 			WHERE ph.plan_id = ? AND t.status = 'completed'`
-	s.db.QueryRow(query, params.PlanID).Scan(&completed)
+	if err := s.db.QueryRow(query, params.PlanID).Scan(&completed); err != nil {
+		return nil, fmt.Errorf("failed to count completed tasks: %w", err)
+	}
 
 	var progress float64
 	if total > 0 {
@@ -492,7 +498,9 @@ func (s *Server) handlePlanProgress(ctx context.Context, req *Request) (*Respons
 	var createdAt time.Time
 	var phaseCount, completedPhases int
 
-	s.db.QueryRow(query, params.PlanID).Scan(&planTitle, &planStatus, &createdAt, &phaseCount, &completedPhases)
+	if err := s.db.QueryRow(query, params.PlanID).Scan(&planTitle, &planStatus, &createdAt, &phaseCount, &completedPhases); err != nil {
+		return nil, fmt.Errorf("failed to get plan details: %w", err)
+	}
 
 	return &Response{Result: map[string]interface{}{
 		"plan_id":          params.PlanID,
@@ -568,10 +576,14 @@ func (s *Server) handleHumanReviewDecide(ctx context.Context, req *Request) (*Re
 	}
 
 	var reviewType, entityID string
-	s.db.QueryRow(`SELECT review_type, entity_id FROM human_reviews WHERE id = ?`, params.ReviewID).Scan(&reviewType, &entityID)
+	if err := s.db.QueryRow(`SELECT review_type, entity_id FROM human_reviews WHERE id = ?`, params.ReviewID).Scan(&reviewType, &entityID); err != nil {
+		return nil, fmt.Errorf("failed to get review: %w", err)
+	}
 
 	if params.Decision == "approved" && reviewType == "prd_approval" {
-		s.db.Exec(`UPDATE plans SET status = 'active' WHERE id = ?`, entityID)
+		if _, err := s.db.Exec(`UPDATE plans SET status = 'active' WHERE id = ?`, entityID); err != nil {
+			return nil, fmt.Errorf("failed to activate plan: %w", err)
+		}
 	}
 
 	return &Response{Result: map[string]interface{}{
@@ -668,7 +680,10 @@ func (s *Server) handlePRDParse(ctx context.Context, req *Request) (*Response, e
 		return nil, fmt.Errorf("failed to create PRD: %w", err)
 	}
 
-	requirements := s.extractRequirements(content, prdID)
+	requirements, err := s.extractRequirements(content, prdID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract requirements: %w", err)
+	}
 
 	return &Response{Result: map[string]interface{}{
 		"prd_id":             prdID,
@@ -800,7 +815,9 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 		phaseID := generateID("phase")
 		phaseQuery := `INSERT INTO phases (id, plan_id, name, order_num, status, created_at, updated_at)
 					   VALUES (?, ?, ?, ?, 'pending', ?, ?)`
-		s.db.Exec(phaseQuery, phaseID, planID, phase, i, now, now)
+		if _, err := s.db.Exec(phaseQuery, phaseID, planID, phase, i, now, now); err != nil {
+			return nil, fmt.Errorf("failed to create phase: %w", err)
+		}
 
 		for _, req := range requirements {
 			taskTitle := fmt.Sprintf("[%s] %s", strings.ToUpper(req.Type), req.Title)
@@ -823,7 +840,9 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 		} else if t.Type == "medium" {
 			priority = 2
 		}
-		s.db.Exec(taskQuery, taskID, planID, t.PhaseIndex, t.Title, priority, now, now)
+		if _, err := s.db.Exec(taskQuery, taskID, planID, t.PhaseIndex, t.Title, priority, now, now); err != nil {
+			return nil, fmt.Errorf("failed to create task: %w", err)
+		}
 		taskIDs = append(taskIDs, taskID)
 	}
 
@@ -887,7 +906,7 @@ func extractPRDVersion(content string) string {
 	return "1.0"
 }
 
-func (s *Server) extractRequirements(content string, prdID string) []map[string]string {
+func (s *Server) extractRequirements(content string, prdID string) ([]map[string]string, error) {
 	requirements := []map[string]string{}
 
 	re := regexp.MustCompile(`(?m)^[-*]\s+\[?\s*([A-Z]+-?\d*)\s*\]?\s*[:.-]?\s*(.+)`)
@@ -914,10 +933,13 @@ func (s *Server) extractRequirements(content string, prdID string) []map[string]
 		})
 
 		reqQuery := `INSERT INTO prd_requirements (id, prd_id, req_type, priority, title, status) VALUES (?, ?, ?, 'medium', ?, 'pending')`
-		s.db.Exec(reqQuery, generateID("req"), prdID, reqType, title)
+		_, err := s.db.Exec(reqQuery, generateID("req"), prdID, reqType, title)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert requirement: %w", err)
+		}
 	}
 
-	return requirements
+	return requirements, nil
 }
 
 func osReadFile(path string) (string, error) {

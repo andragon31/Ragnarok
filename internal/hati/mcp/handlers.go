@@ -187,35 +187,49 @@ func (s *Server) handlePlanRevise(ctx context.Context, req *Request) (*Response,
 	newState := "needs_revision"
 
 	insertRev := `INSERT INTO plan_revisions (id, plan_id, previous_state, new_state, changes_summary, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)`
-	s.db.Exec(insertRev, revisionID, params.PlanID, prevState, newState, changesSummary, time.Now())
+	if _, err := s.db.Exec(insertRev, revisionID, params.PlanID, prevState, newState, changesSummary, time.Now()); err != nil {
+		return nil, fmt.Errorf("failed to create plan revision: %w", err)
+	}
 
 	if params.RevisionID != "" {
 		updateRevQuery := `UPDATE plan_revisions SET status = 'applied', applied_at = ? WHERE id = ?`
-		s.db.Exec(updateRevQuery, time.Now(), params.RevisionID)
+		if _, err := s.db.Exec(updateRevQuery, time.Now(), params.RevisionID); err != nil {
+			return nil, fmt.Errorf("failed to update revision status: %w", err)
+		}
 	}
 
 	if params.Title != "" {
 		updatePlanQuery := `UPDATE plans SET title = ?, status = 'needs_revision', updated_at = ? WHERE id = ?`
-		s.db.Exec(updatePlanQuery, params.Title, time.Now(), params.PlanID)
+		if _, err := s.db.Exec(updatePlanQuery, params.Title, time.Now(), params.PlanID); err != nil {
+			return nil, fmt.Errorf("failed to update plan title: %w", err)
+		}
 	}
 
 	if params.Description != "" {
 		updatePlanQuery := `UPDATE plans SET description = ?, status = 'needs_revision', updated_at = ? WHERE id = ?`
-		s.db.Exec(updatePlanQuery, params.Description, time.Now(), params.PlanID)
+		if _, err := s.db.Exec(updatePlanQuery, params.Description, time.Now(), params.PlanID); err != nil {
+			return nil, fmt.Errorf("failed to update plan description: %w", err)
+		}
 	}
 
 	if len(params.NewPhases) > 0 {
 		for i, phaseName := range params.NewPhases {
 			phaseID := generateID("phase")
 			insertPhase := `INSERT INTO phases (id, plan_id, name, status, order_num, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?)`
-			s.db.Exec(insertPhase, phaseID, params.PlanID, phaseName, i+1, time.Now(), time.Now())
+			if _, err := s.db.Exec(insertPhase, phaseID, params.PlanID, phaseName, i+1, time.Now(), time.Now()); err != nil {
+				return nil, fmt.Errorf("failed to insert phase: %w", err)
+			}
 		}
 		updatePlanQuery := `UPDATE plans SET status = 'needs_revision', updated_at = ? WHERE id = ?`
-		s.db.Exec(updatePlanQuery, time.Now(), params.PlanID)
+		if _, err := s.db.Exec(updatePlanQuery, time.Now(), params.PlanID); err != nil {
+			return nil, fmt.Errorf("failed to update plan status: %w", err)
+		}
 	}
 
 	blockerQuery := `INSERT INTO execution_blockers (id, plan_id, reason, type, blocked_at) VALUES (?, ?, ?, 'revision_required', ?)`
-	s.db.Exec(blockerQuery, generateID("block"), params.PlanID, changesSummary, time.Now())
+	if _, err := s.db.Exec(blockerQuery, generateID("block"), params.PlanID, changesSummary, time.Now()); err != nil {
+		return nil, fmt.Errorf("failed to insert blocker: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -291,7 +305,9 @@ func (s *Server) handlePlanCompleteness(ctx context.Context, req *Request) (*Res
 
 	query := `SELECT COUNT(*), SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) FROM phases WHERE plan_id = ?`
 	var total, completed int
-	s.db.QueryRow(query, params.PlanID).Scan(&total, &completed)
+	if err := s.db.QueryRow(query, params.PlanID).Scan(&total, &completed); err != nil {
+		return nil, fmt.Errorf("failed to get phase progress: %w", err)
+	}
 
 	score := 0.0
 	if total > 0 {
@@ -418,7 +434,9 @@ func (s *Server) handleCheckpointDecide(ctx context.Context, req *Request) (*Res
 	}
 
 	recQuery := `INSERT INTO approval_record (id, plan_id, decision, approver, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)`
-	s.db.Exec(recQuery, record.ID, record.PlanID, record.Decision, record.Approver, record.Notes, record.CreatedAt)
+	if _, err := s.db.Exec(recQuery, record.ID, record.PlanID, record.Decision, record.Approver, record.Notes, record.CreatedAt); err != nil {
+		return nil, fmt.Errorf("failed to create approval record: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -475,7 +493,9 @@ func (s *Server) handlePhaseStart(ctx context.Context, req *Request) (*Response,
 
 	orderQuery := `SELECT COALESCE(MAX(order_num), 0) + 1 FROM phases WHERE plan_id = ?`
 	var orderNum int
-	s.db.QueryRow(orderQuery, params.PlanID).Scan(&orderNum)
+	if err := s.db.QueryRow(orderQuery, params.PlanID).Scan(&orderNum); err != nil {
+		return nil, fmt.Errorf("failed to get order number: %w", err)
+	}
 
 	phase := &Phase{
 		ID:        generateID("phase"),
@@ -607,15 +627,21 @@ func (s *Server) handleFeedbackReceive(ctx context.Context, req *Request) (*Resp
 		err := s.db.QueryRow(cpQuery, params.FeedbackID).Scan(&cp.ID, &cp.PlanID, &cp.PhaseID)
 		if err == nil && cp.PlanID != "" {
 			updateCpQuery := `UPDATE checkpoints SET status = 'rejected', can_continue = 0, feedback = ? WHERE id = ?`
-			s.db.Exec(updateCpQuery, params.Content, cp.ID)
+			if _, err := s.db.Exec(updateCpQuery, params.Content, cp.ID); err != nil {
+				return nil, fmt.Errorf("failed to update checkpoint: %w", err)
+			}
 
 			blockerID := generateID("block")
 			blockReason := fmt.Sprintf("User rejection: %s", params.Content)
 			blockerQuery := `INSERT INTO execution_blockers (id, plan_id, checkpoint_id, reason, type, blocked_at) VALUES (?, ?, ?, ?, 'user_rejection', ?)`
-			s.db.Exec(blockerQuery, blockerID, cp.PlanID, cp.ID, blockReason, time.Now())
+			if _, err := s.db.Exec(blockerQuery, blockerID, cp.PlanID, cp.ID, blockReason, time.Now()); err != nil {
+				return nil, fmt.Errorf("failed to insert blocker: %w", err)
+			}
 
 			abandonQuery := `UPDATE plans SET status = 'needs_revision', updated_at = ? WHERE id = ?`
-			s.db.Exec(abandonQuery, time.Now(), cp.PlanID)
+			if _, err := s.db.Exec(abandonQuery, time.Now(), cp.PlanID); err != nil {
+				return nil, fmt.Errorf("failed to update plan status: %w", err)
+			}
 
 			result["action_triggered"] = "plan_revise"
 			result["plan_id"] = cp.PlanID
@@ -678,7 +704,9 @@ func (s *Server) handlePlanRestart(ctx context.Context, req *Request) (*Response
 
 	var currentStatus string
 	statusQuery := `SELECT status FROM plans WHERE id = ?`
-	s.db.QueryRow(statusQuery, params.PlanID).Scan(&currentStatus)
+	if err := s.db.QueryRow(statusQuery, params.PlanID).Scan(&currentStatus); err != nil {
+		return nil, fmt.Errorf("failed to get plan status: %w", err)
+	}
 
 	if currentStatus == "needs_revision" {
 		return nil, fmt.Errorf("plan has pending revisions, use plan_revise first")
@@ -694,13 +722,19 @@ func (s *Server) handlePlanRestart(ctx context.Context, req *Request) (*Response
 	}
 
 	resetPhasesQuery := `UPDATE phases SET status = 'pending' WHERE plan_id = ? AND order_num >= ?`
-	s.db.Exec(resetPhasesQuery, params.PlanID, startPhase)
+	if _, err := s.db.Exec(resetPhasesQuery, params.PlanID, startPhase); err != nil {
+		return nil, fmt.Errorf("failed to reset phases: %w", err)
+	}
 
 	clearBlockersQuery := `UPDATE execution_blockers SET resolved_at = ? WHERE plan_id = ? AND resolved_at IS NULL`
-	s.db.Exec(clearBlockersQuery, time.Now(), params.PlanID)
+	if _, err := s.db.Exec(clearBlockersQuery, time.Now(), params.PlanID); err != nil {
+		return nil, fmt.Errorf("failed to clear blockers: %w", err)
+	}
 
 	updatePlanQuery := `UPDATE plans SET status = 'in_progress', updated_at = ? WHERE id = ?`
-	s.db.Exec(updatePlanQuery, time.Now(), params.PlanID)
+	if _, err := s.db.Exec(updatePlanQuery, time.Now(), params.PlanID); err != nil {
+		return nil, fmt.Errorf("failed to update plan status: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -729,7 +763,9 @@ func (s *Server) handlePlanResume(ctx context.Context, req *Request) (*Response,
 
 	var blockerCount int
 	blockerQuery := `SELECT COUNT(*) FROM execution_blockers WHERE plan_id = ? AND resolved_at IS NULL`
-	s.db.QueryRow(blockerQuery, params.PlanID).Scan(&blockerCount)
+	if err := s.db.QueryRow(blockerQuery, params.PlanID).Scan(&blockerCount); err != nil {
+		return nil, fmt.Errorf("failed to check blockers: %w", err)
+	}
 
 	if blockerCount > 0 {
 		return nil, fmt.Errorf("plan has %d unresolved blockers, resolve them first", blockerCount)
@@ -737,11 +773,15 @@ func (s *Server) handlePlanResume(ctx context.Context, req *Request) (*Response,
 
 	if params.RevisionID != "" {
 		applyRevQuery := `UPDATE plan_revisions SET status = 'applied', applied_at = ? WHERE id = ?`
-		s.db.Exec(applyRevQuery, time.Now(), params.RevisionID)
+		if _, err := s.db.Exec(applyRevQuery, time.Now(), params.RevisionID); err != nil {
+			return nil, fmt.Errorf("failed to apply revision: %w", err)
+		}
 	}
 
 	resumeQuery := `UPDATE plans SET status = 'in_progress', updated_at = ? WHERE id = ?`
-	s.db.Exec(resumeQuery, time.Now(), params.PlanID)
+	if _, err := s.db.Exec(resumeQuery, time.Now(), params.PlanID); err != nil {
+		return nil, fmt.Errorf("failed to resume plan: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -827,16 +867,24 @@ func (s *Server) handleCheckpointApprove(ctx context.Context, req *Request) (*Re
 
 	var planID string
 	cpQuery := `SELECT plan_id FROM checkpoints WHERE id = ?`
-	s.db.QueryRow(cpQuery, params.CheckpointID).Scan(&planID)
+	if err := s.db.QueryRow(cpQuery, params.CheckpointID).Scan(&planID); err != nil {
+		return nil, fmt.Errorf("failed to get checkpoint plan: %w", err)
+	}
 
 	updateCp := `UPDATE checkpoints SET status = 'approved', can_continue = 1, decided_at = ?, decided_by = ?, feedback = ? WHERE id = ?`
-	s.db.Exec(updateCp, time.Now(), params.Approver, params.Notes, params.CheckpointID)
+	if _, err := s.db.Exec(updateCp, time.Now(), params.Approver, params.Notes, params.CheckpointID); err != nil {
+		return nil, fmt.Errorf("failed to update checkpoint: %w", err)
+	}
 
 	resolveBlockers := `UPDATE execution_blockers SET resolved_at = ? WHERE plan_id = ? AND checkpoint_id = ? AND type = 'user_rejection'`
-	s.db.Exec(resolveBlockers, time.Now(), planID, params.CheckpointID)
+	if _, err := s.db.Exec(resolveBlockers, time.Now(), planID, params.CheckpointID); err != nil {
+		return nil, fmt.Errorf("failed to resolve blockers: %w", err)
+	}
 
 	recordQuery := `INSERT INTO approval_record (id, plan_id, decision, approver, notes, created_at) VALUES (?, ?, 'approved', ?, ?, ?)`
-	s.db.Exec(recordQuery, generateID("record"), planID, params.Approver, params.Notes, time.Now())
+	if _, err := s.db.Exec(recordQuery, generateID("record"), planID, params.Approver, params.Notes, time.Now()); err != nil {
+		return nil, fmt.Errorf("failed to create approval record: %w", err)
+	}
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -1452,7 +1500,14 @@ func (s *Server) handlePlanRecover(ctx context.Context, req *Request) (*Response
 
 	if err == sql.ErrNoRows {
 		var planStatus string
-		s.db.QueryRow(`SELECT status FROM plans WHERE id = ?`, params.PlanID).Scan(&planStatus)
+		if err := s.db.QueryRow(`SELECT status FROM plans WHERE id = ?`, params.PlanID).Scan(&planStatus); err != nil {
+			recoveryState = "unknown"
+			recoveryNeeded = false
+			return &Response{Result: map[string]interface{}{
+				"recovery_needed": recoveryNeeded,
+				"recovery_state":  recoveryState,
+			}}, nil
+		}
 
 		if planStatus == "in_progress" {
 			recoveryState = "agent_disconnected"
