@@ -111,10 +111,19 @@ func (s *Server) handleTaskCreate(ctx context.Context, req *Request) (*Response,
 	subtasksJSON, _ := json.Marshal(params.Subtasks)
 	agentIDsJSON, _ := json.Marshal(params.AssignedAgentIDs)
 
+	assignedAgentType := params.AssignedAgentType
+	if assignedAgentType == "" {
+		assignedAgentType = "worker"
+	}
+
 	query := `INSERT INTO tasks (id, phase_id, prd_requirement_id, title, description, status, priority, assigned_agent_ids, assigned_agent_type, estimated_hours, milestone, subtasks, created_at, updated_at)
 			  VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := s.db.Exec(query, taskID, params.PhaseID, params.PRDRequirementID, params.Title, params.Description,
-		params.Priority, string(agentIDsJSON), params.AssignedAgentType, params.EstimatedHours,
+	var prdReqID interface{} = nil
+	if params.PRDRequirementID != "" {
+		prdReqID = params.PRDRequirementID
+	}
+	_, err := s.db.Exec(query, taskID, params.PhaseID, prdReqID, params.Title, params.Description,
+		params.Priority, string(agentIDsJSON), assignedAgentType, params.EstimatedHours,
 		params.Milestone, string(subtasksJSON), now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create task: %w", err)
