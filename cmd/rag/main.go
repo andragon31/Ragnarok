@@ -18,7 +18,7 @@ import (
 	"github.com/andragon31/Ragnarok/internal/mcp/unified"
 )
 
-var version = "2.2.0"
+var version = "2.2.2"
 
 type Plugin struct {
 	Name    string
