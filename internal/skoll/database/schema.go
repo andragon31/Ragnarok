@@ -188,18 +188,48 @@ func InitSchema(db *sql.DB) error {
 }
 
 func runMigrations(db *sql.DB) error {
-	migrations := []string{
-		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS capabilities TEXT`,
-		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_type TEXT`,
-		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS allowed_tools TEXT`,
+	migrations := []struct {
+		table   string
+		column  string
+		colType string
+		addSQL  string
+	}{
+		{"agents", "capabilities", "TEXT", `ALTER TABLE agents ADD COLUMN capabilities TEXT`},
+		{"agents", "agent_type", "TEXT", `ALTER TABLE agents ADD COLUMN agent_type TEXT`},
+		{"agents", "allowed_tools", "TEXT", `ALTER TABLE agents ADD COLUMN allowed_tools TEXT`},
 	}
 
-	for _, migration := range migrations {
-		_, err := db.Exec(migration)
-		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
-			log.Printf("Migration warning: %v", err)
+	for _, m := range migrations {
+		if !columnExists(db, m.table, m.column) {
+			_, err := db.Exec(m.addSQL)
+			if err != nil && !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
+				log.Printf("Migration warning for %s.%s: %v", m.table, m.column, err)
+			}
 		}
 	}
 
 	return nil
+}
+
+func columnExists(db *sql.DB, table, column string) bool {
+	query := fmt.Sprintf("PRAGMA table_info(%s)", table)
+	rows, err := db.Query(query)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt_value interface{}
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt_value, &pk); err != nil {
+			continue
+		}
+		if name == column {
+			return true
+		}
+	}
+	return false
 }
