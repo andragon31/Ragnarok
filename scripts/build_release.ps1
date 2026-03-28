@@ -4,7 +4,7 @@
 param(
     [switch]$SkipBuild,
     [switch]$SkipUpload,
-    [string]$Version = "2.0.0"
+    [string]$Version = "2.0.1"
 )
 
 $ErrorActionPreference = "Stop"

@@ -58,66 +58,49 @@ graph LR
 
 En lugar de múltiples llamadas MCP, Ragnarok ofrece **workflows** que executan todo internamente:
 
-### 1. `workflow_project_bootstrap`
-Inicializa la estructura completa de un proyecto:
+### 1. `workflow_stack_based_init` ⭐ RECOMENDADO
+Inicializa proyecto detectando stack automáticamente y creando fases/tareas apropiadas:
 
 ```bash
-workflow_project_bootstrap --project_path "./mi-proyecto" --project_name "MiApp"
+workflow_stack_based_init --project_path "./mi-proyecto" --title "MiApp"
 ```
 
 **Ejecuta internamente:**
-- `project_scan` → Detecta stack y tecnología
-- `project_bootstrap` → Genera `.ragnarok/`
-- `skill_generate` → Skills del proyecto
-- `rules_generate` → Reglas del proyecto
-- `standards_generate` → Standards del proyecto
-- `agents_md_get` → Genera AGENTS.md
-
----
-
-### 2. `workflow_prd_analyze`
-Analiza un PRD y crea el plan de desarrollo:
-
-```bash
-workflow_prd_analyze --prd_file "./PRD.md" --project_path "./mi-proyecto"
-```
-
-**Ejecuta internamente:**
-- `prd_parse` → Extrae requisitos
-- `prd_requirements_extract` → Lista requisitos
-- `plan_create_from_prd` → Crea plan con fases y tareas
+- `project_scan` → Detecta stack (Go, Node, Python, etc.), arquitectura, CI/CD
+- `plan_create` → Crea plan basado en el stack detectado
+- `phase_create` → Crea fases según stack (Setup, Backend, Frontend, Database, Testing, DevOps, Docs)
+- `task_create` → Crea tareas específicas del stack
+- `task_assign_agents` → Asigna agentes según tipo de tarea
 - `human_review_create` → Solicita approval humano
 
----
-
-### 3. `workflow_agentic_init`
-Crea la estructura agentica completa:
-
-```bash
-workflow_agentic_init --title "MiApp" --phases "Backend,Frontend,Testing,Deploy"
-```
-
-**Ejecuta internamente:**
-- `plan_create` → Crea plan
-- `phase_create` (xN) → Crea fases
-- `team_create` → Registra equipo
-- `human_review_create` → Approval para asignar agentes
+**Fases generadas según stack:**
+| Stack | Fases |
+|-------|-------|
+| Go | Setup, Backend, API, Database, Testing, DevOps, Documentation |
+| Node/React | Setup, Frontend, API, Database, Testing, DevOps, Documentation |
+| Python | Setup, Backend, API, Database, Testing, DevOps, Documentation |
+| Multi-stack | Setup, Backend, Frontend, Database, Testing, DevOps, Documentation |
 
 ---
 
-### 4. `workflow_plan_develop`
-Ejecuta el desarrollo guiado por tareas:
+### 2. `workflow_plan_develop_v2` ⭐ RECOMENDADO
+Ejecuta el desarrollo con delegación multi-agente:
 
 ```bash
-workflow_plan_develop --plan_id "plan_xxx" --auto_continue true
+workflow_plan_develop_v2 --plan_id "plan_xxx" --auto_continue true
 ```
 
 **Flujo autónomo:**
 ```
 while (tareas_pendientes) {
-    task = task_get_next
-    agent_skoll = ejecutar(task)
-    task_update(status: "completed")
+    task = task_get_next(plan_id, agent_id)
+    if (task.tiene_agentes) {
+        for each agente in task.agentes {
+            task_execute(task_id, agente.id)  // Delega a Skoll
+        }
+    } else {
+        task_update(status: "in_progress")
+    }
     
     if (is_milestone) {
         checkpoint_create
@@ -128,7 +111,34 @@ while (tareas_pendientes) {
 
 ---
 
-### 5. `workflow_checkpoint_create`
+### 3. `workflow_prd_analyze` [DEPRECATED]
+Analiza un PRD y crea el plan de desarrollo:
+
+```bash
+workflow_prd_analyze --prd_file "./PRD.md" --project_path "./mi-proyecto"
+```
+
+**Nota:** Ahora incluye `project_scan` para detección de stack.
+
+---
+
+### 4. `workflow_agentic_init` [DEPRECATED]
+Crea la estructura agentica completa:
+
+```bash
+workflow_agentic_init --title "MiApp" --phases "Backend,Frontend,Testing,Deploy"
+```
+
+**Recomendación:** Usar `workflow_stack_based_init` en su lugar.
+
+---
+
+### 5. `workflow_plan_develop` [DEPRECATED]
+Usar `workflow_plan_develop_v2` para soporte multi-agente.
+
+---
+
+### 6. `workflow_checkpoint_create`
 Crea checkpoint de calidad:
 
 ```bash
@@ -197,24 +207,28 @@ graph TD
 ## Instalación
 
 ```powershell
-irm https://raw.githubusercontent.com/andragon31/Ragnarok/v2.0.0/install.ps1 | iex
+irm https://raw.githubusercontent.com/andragon31/Ragnarok/v2.0.1/install.ps1 | iex
 ```
 
 ## Uso Rápido
 
 ```bash
-# 1. Escanear proyecto
-rag scan --path ./mi-proyecto --bootstrap
+# 1. Inicializar proyecto con detección automática de stack (RECOMENDADO)
+workflow_stack_based_init --project_path "./mi-proyecto" --title "MiApp"
 
-# 2. Analizar PRD y crear plan
+# 2. Analizar PRD y crear plan (con detección de stack)
 workflow_prd_analyze --prd_file "./PRD.md" --project_path "./mi-proyecto"
 
-# 3. Inicializar agentes
-workflow_agentic_init --title "MiApp" --phases "Backend,Frontend,Testing"
-
-# 4. Ejecutar desarrollo (delegación directa a agentes)
-workflow_plan_develop --plan_id "plan_xxx" --auto_continue true
+# 3. Ejecutar desarrollo con multi-agente (RECOMENDADO)
+workflow_plan_develop_v2 --plan_id "plan_xxx" --auto_continue true
 ```
+
+### Novedades v2.0.1
+
+- **Tests**: Cobertura de tests para task handlers y workflow handlers
+- **Workflow PRD Analyze Actualizado**: Ahora incluye detección de stack
+- **Workflows Deprecated**: Marcas deprecación en workflows antiguos
+- **Gitignore**: Archivos de release ignorados
 
 ### Novedades v2.0.0
 
@@ -241,27 +255,21 @@ workflow_plan_develop --plan_id "plan_xxx" --auto_continue true
 ```bash
 # 1. Crear PRD.md con requisitos...
 
-# 2. Inicializar proyecto
-rag init --project "mi-proyecto"
+# 2. Inicializar proyecto con detección automática de stack
+workflow_stack_based_init --project_path "./mi-proyecto" --title "MiApp"
 
-# 3. Escanear y bootstrap
-rag scan --path ./mi-proyecto --bootstrap
-
-# 4. Analizar PRD → Crea Plan con Tareas
-workflow_prd_analyze --prd_file "./PRD.md" --project_path "./mi-proyecto"
-
-# 5. El agente recibe notification de approval
+# 3. El agente recibe notification de approval
 #    Usuario aprueba via: human_review_decide --review_id "xxx" --decision "approved"
 
-# 6. Ejecutar desarrollo automáticamente
-workflow_plan_develop --plan_id "plan_xxx" --auto_continue true
+# 4. Ejecutar desarrollo con multi-agente
+workflow_plan_develop_v2 --plan_id "plan_xxx" --auto_continue true
 
-# 7. En cada checkpoint, el agente notifica al humano
+# 5. En cada checkpoint, el agente notifica al humano
 #    Usuario approves via: human_review_decide --review_id "yyy" --decision "approved"
 
-# 8. Al final, usuario approves deploy
+# 6. Al final, usuario approves deploy
 ```
 
 ---
 
-**v2.0.0** - Agent-Based Orchestration con Multi-Agent Tasks
+**v2.0.1** - Agent-Based Orchestration con Multi-Agent Tasks

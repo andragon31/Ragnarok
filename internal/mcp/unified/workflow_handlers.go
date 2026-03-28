@@ -116,6 +116,17 @@ func (s *Server) handleWorkflowPRDAnalyze(ctx context.Context, req *Request) (*R
 		results[name] = out
 	}
 
+	if params.ProjectPath == "" {
+		params.ProjectPath = "."
+	}
+
+	step("project_scan", func() (interface{}, error) {
+		return s.callTool(ctx, "project_scan", map[string]interface{}{"path": params.ProjectPath})
+	})
+
+	scanResult := results["project_scan"]
+	analysis, _ := parseProjectAnalysis(scanResult)
+
 	step("prd_parse", func() (interface{}, error) {
 		return s.callTool(ctx, "prd_parse", map[string]interface{}{"file_path": params.PRDFile})
 	})
@@ -143,6 +154,17 @@ func (s *Server) handleWorkflowPRDAnalyze(ctx context.Context, req *Request) (*R
 		}
 	}
 
+	if analysis != nil {
+		phaseTemplates := scanner.GeneratePhasesAndTasks(analysis)
+		for i, template := range phaseTemplates {
+			s.callTool(ctx, "phase_create", map[string]interface{}{
+				"plan_id":   planID,
+				"title":     template.Name,
+				"order_num": i,
+			})
+		}
+	}
+
 	step("human_review_create", func() (interface{}, error) {
 		return s.callTool(ctx, "human_review_create", map[string]interface{}{
 			"review_type": "prd_approval",
@@ -153,13 +175,15 @@ func (s *Server) handleWorkflowPRDAnalyze(ctx context.Context, req *Request) (*R
 	})
 
 	return &Response{Result: map[string]interface{}{
-		"workflow": "prd_analyze",
-		"status":   "completed",
-		"prd_id":   prdID,
-		"plan_id":  planID,
-		"steps":    steps,
-		"results":  results,
-		"message":  "Plan created. Human review required before activation.",
+		"workflow":       "prd_analyze",
+		"status":         "completed",
+		"prd_id":         prdID,
+		"plan_id":        planID,
+		"stack_detected": analysis != nil,
+		"stack":          analysis.Stack,
+		"steps":          steps,
+		"results":        results,
+		"message":        "Plan created with stack-based phases. Human review required before activation.",
 	}}, nil
 }
 

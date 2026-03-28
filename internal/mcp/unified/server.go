@@ -142,22 +142,22 @@ func (s *Server) registerWorkflowHandlers() {
 		fn     func(context.Context, *Request) (*Response, error)
 	}{
 		"workflow_project_bootstrap": {
-			desc:   "Bootstrap complete project structure",
+			desc:   "Bootstrap complete project structure [DEPRECATED: Use workflow_stack_based_init]",
 			schema: `{"type":"object","properties":{"project_path":{"type":"string"},"project_name":{"type":"string"},"prd_file":{"type":"string"}},"required":["project_path"]}`,
 			fn:     s.handleWorkflowProjectBootstrap,
 		},
 		"workflow_prd_analyze": {
-			desc:   "Analyze PRD and create development plan",
+			desc:   "Analyze PRD and create development plan [DEPRECATED: Use workflow_stack_based_init]",
 			schema: `{"type":"object","properties":{"prd_file":{"type":"string"},"project_path":{"type":"string"},"plan_title":{"type":"string"}},"required":["prd_file"]}`,
 			fn:     s.handleWorkflowPRDAnalyze,
 		},
 		"workflow_agentic_init": {
-			desc:   "Initialize agentic development structure",
+			desc:   "Initialize agentic development structure [DEPRECATED: Use workflow_stack_based_init]",
 			schema: `{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"phases":{"type":"array","items":{"type":"string"}},"agent_name":{"type":"string"},"project_path":{"type":"string"}},"required":["title","phases"]}`,
 			fn:     s.handleWorkflowAgenticInit,
 		},
 		"workflow_plan_develop": {
-			desc:   "Execute development guided by tasks",
+			desc:   "Execute development guided by tasks [DEPRECATED: Use workflow_plan_develop_v2]",
 			schema: `{"type":"object","properties":{"plan_id":{"type":"string"},"agent_id":{"type":"string"},"auto_continue":{"type":"boolean"}},"required":["plan_id"]}`,
 			fn:     s.handleWorkflowPlanDevelop,
 		},
@@ -167,7 +167,7 @@ func (s *Server) registerWorkflowHandlers() {
 			fn:     s.handleWorkflowPlanDevelopV2,
 		},
 		"workflow_stack_based_init": {
-			desc:   "Initialize project with stack-based phases and tasks",
+			desc:   "Initialize project with stack-based phases and tasks (Recommended)",
 			schema: `{"type":"object","properties":{"project_path":{"type":"string"},"title":{"type":"string"},"phases":{"type":"array","items":{"type":"string"}},"agent_ids":{"type":"array","items":{"type":"string"}}},"required":["project_path"]}`,
 			fn:     s.handleWorkflowStackBasedInit,
 		},

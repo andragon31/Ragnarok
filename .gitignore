@@ -1,0 +1,38 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.exe~
+rag.exe
+
+# Build outputs
+bin/
+release/bin/
+release/zips/
+release/*.zip
+
+# Ragnarok data directories (user-specific)
+.ragnarok/
+.skoll/
+.tyr/
+.fenrir/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+*.out
+coverage.txt
+
+# Temporary files
+*.tmp
+*.log
