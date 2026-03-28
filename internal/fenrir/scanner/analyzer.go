@@ -763,3 +763,168 @@ func (a *ProjectAnalysis) ToJSON() string {
 	b, _ := json.MarshalIndent(a, "", "  ")
 	return string(b)
 }
+
+type PhaseTemplate struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Tasks       []TaskTemplate `json:"tasks"`
+	AgentType   string         `json:"agent_type"`
+}
+
+type TaskTemplate struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Priority    int      `json:"priority"`
+	Milestone   bool     `json:"milestone"`
+	AgentTypes  []string `json:"agent_types"`
+}
+
+func GeneratePhasesAndTasks(analysis *ProjectAnalysis) []PhaseTemplate {
+	phases := []PhaseTemplate{}
+
+	phases = append(phases, PhaseTemplate{
+		Name:        "Setup",
+		Description: "Initialize project structure and dependencies",
+		AgentType:   "backend",
+		Tasks: []TaskTemplate{
+			{Title: "Setup project structure", Description: "Create base directories and configuration files", Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
+			{Title: "Install dependencies", Description: "Install all required dependencies for " + analysis.Stack.PackageMgr, Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
+		},
+	})
+
+	if analysis.Architecture.HasAPI || analysis.Stack.Framework != "" {
+		phases = append(phases, PhaseTemplate{
+			Name:        "Backend",
+			Description: "Implement backend services with " + analysis.Stack.Framework,
+			AgentType:   "backend",
+			Tasks: []TaskTemplate{
+				{Title: "Design database schema", Description: "Create database models and migrations", Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
+				{Title: "Implement API endpoints", Description: "Create REST/GraphQL endpoints for " + analysis.Stack.Framework, Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
+				{Title: "Implement business logic", Description: "Add service layer and business rules", Priority: 2, Milestone: false, AgentTypes: []string{"backend"}},
+				{Title: "Add authentication", Description: "Implement auth endpoints and middleware", Priority: 3, Milestone: false, AgentTypes: []string{"backend", "security"}},
+			},
+		})
+	}
+
+	if analysis.Architecture.HasFrontend || analysis.Stack.HasDocker {
+		frontendFramework := analysis.Architecture.FrontendLib
+		if frontendFramework == "" {
+			frontendFramework = analysis.Stack.Framework
+		}
+		phases = append(phases, PhaseTemplate{
+			Name:        "Frontend",
+			Description: "Implement frontend with " + frontendFramework,
+			AgentType:   "frontend",
+			Tasks: []TaskTemplate{
+				{Title: "Setup " + frontendFramework + " project", Description: "Initialize frontend app and routing", Priority: 3, Milestone: false, AgentTypes: []string{"frontend"}},
+				{Title: "Implement UI components", Description: "Create reusable UI components", Priority: 2, Milestone: false, AgentTypes: []string{"frontend"}},
+				{Title: "Integrate API", Description: "Connect frontend to backend API", Priority: 3, Milestone: false, AgentTypes: []string{"frontend", "backend"}},
+				{Title: "Add state management", Description: "Implement global state and data fetching", Priority: 2, Milestone: false, AgentTypes: []string{"frontend"}},
+			},
+		})
+	}
+
+	if analysis.Stack.DBEngine != "" {
+		phases = append(phases, PhaseTemplate{
+			Name:        "Database",
+			Description: "Setup and optimize database for " + analysis.Stack.DBEngine,
+			AgentType:   "backend",
+			Tasks: []TaskTemplate{
+				{Title: "Create database schema", Description: "Design and create tables for " + analysis.Stack.DBEngine, Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
+				{Title: "Add migrations", Description: "Setup database migration system", Priority: 2, Milestone: false, AgentTypes: []string{"backend"}},
+				{Title: "Seed data", Description: "Add seed data for development", Priority: 1, Milestone: false, AgentTypes: []string{"backend"}},
+			},
+		})
+	}
+
+	if analysis.Stack.HasTests {
+		testFramework := analysis.Stack.TestFramework
+		if testFramework == "" {
+			testFramework = "testing"
+		}
+		phases = append(phases, PhaseTemplate{
+			Name:        "Testing",
+			Description: "Implement tests with " + testFramework,
+			AgentType:   "qa",
+			Tasks: []TaskTemplate{
+				{Title: "Setup test infrastructure", Description: "Configure " + testFramework + " for the project", Priority: 3, Milestone: false, AgentTypes: []string{"qa", "backend"}},
+				{Title: "Write unit tests", Description: "Add unit tests for core business logic", Priority: 2, Milestone: false, AgentTypes: []string{"qa", "backend"}},
+				{Title: "Write integration tests", Description: "Add integration tests for API endpoints", Priority: 2, Milestone: false, AgentTypes: []string{"qa", "backend"}},
+				{Title: "Setup E2E tests", Description: "Add end-to-end tests if applicable", Priority: 1, Milestone: false, AgentTypes: []string{"qa"}},
+			},
+		})
+	}
+
+	if analysis.Stack.HasDocker || analysis.Architecture.IsMonorepo {
+		phases = append(phases, PhaseTemplate{
+			Name:        "DevOps",
+			Description: "Setup deployment and CI/CD",
+			AgentType:   "devops",
+			Tasks: []TaskTemplate{
+				{Title: "Create Dockerfile", Description: "Add container configuration", Priority: 3, Milestone: false, AgentTypes: []string{"devops"}},
+				{Title: "Setup CI/CD pipeline", Description: "Configure " + analysis.Stack.CITool + " for automated builds", Priority: 3, Milestone: false, AgentTypes: []string{"devops"}},
+				{Title: "Add deployment config", Description: "Setup deployment scripts and configs", Priority: 2, Milestone: false, AgentTypes: []string{"devops"}},
+			},
+		})
+	}
+
+	phases = append(phases, PhaseTemplate{
+		Name:        "Documentation",
+		Description: "Create project documentation",
+		AgentType:   "docs",
+		Tasks: []TaskTemplate{
+			{Title: "Write README", Description: "Document project setup and usage", Priority: 3, Milestone: false, AgentTypes: []string{"docs"}},
+			{Title: "Document API", Description: "Create API documentation", Priority: 2, Milestone: false, AgentTypes: []string{"docs", "backend"}},
+			{Title: "Add inline comments", Description: "Document complex code sections", Priority: 1, Milestone: false, AgentTypes: []string{"backend", "frontend"}},
+		},
+	})
+
+	return phases
+}
+
+func GetRecommendedAgents(analysis *ProjectAnalysis) []map[string]string {
+	agents := []map[string]string{}
+
+	agents = append(agents, map[string]string{
+		"name":  "backend-agent",
+		"type":  "backend",
+		"role":  "Backend Developer",
+		"scope": "API, database, backend services",
+	})
+
+	if analysis.Architecture.HasFrontend || analysis.Stack.HasDocker {
+		agents = append(agents, map[string]string{
+			"name":  "frontend-agent",
+			"type":  "frontend",
+			"role":  "Frontend Developer",
+			"scope": "UI, components, state management",
+		})
+	}
+
+	if analysis.Stack.HasTests {
+		agents = append(agents, map[string]string{
+			"name":  "qa-agent",
+			"type":  "qa",
+			"role":  "QA Engineer",
+			"scope": "Testing, quality assurance",
+		})
+	}
+
+	if analysis.Stack.HasDocker || analysis.Architecture.IsMonorepo {
+		agents = append(agents, map[string]string{
+			"name":  "devops-agent",
+			"type":  "devops",
+			"role":  "DevOps Engineer",
+			"scope": "CI/CD, deployment, infrastructure",
+		})
+	}
+
+	agents = append(agents, map[string]string{
+		"name":  "docs-agent",
+		"type":  "docs",
+		"role":  "Technical Writer",
+		"scope": "Documentation, guides",
+	})
+
+	return agents
+}

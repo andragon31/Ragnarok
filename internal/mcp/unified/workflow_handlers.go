@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/andragon31/Ragnarok/internal/fenrir/scanner"
 	rootmcp "github.com/andragon31/Ragnarok/internal/mcp"
 )
 
@@ -620,4 +622,331 @@ func (s *Server) getDatabaseStats() (map[string]interface{}, error) {
 	}
 
 	return stats, nil
+}
+
+func (s *Server) handleWorkflowStackBasedInit(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		ProjectPath string   `json:"project_path"`
+		Title       string   `json:"title"`
+		Phases      []string `json:"phases,omitempty"`
+		AgentIDs    []string `json:"agent_ids,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.ProjectPath == "" {
+		params.ProjectPath = "."
+	}
+
+	steps := []WorkflowStep{}
+	results := map[string]interface{}{}
+
+	step := func(name string, fn func() (interface{}, error)) {
+		out, err := fn()
+		status := "success"
+		if err != nil {
+			status = "error"
+			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
+		} else {
+			steps = append(steps, WorkflowStep{Name: name, Status: status, Output: out})
+		}
+		results[name] = out
+	}
+
+	step("project_scan", func() (interface{}, error) {
+		return s.callTool(ctx, "project_scan", map[string]interface{}{"path": params.ProjectPath})
+	})
+
+	scanResult := results["project_scan"]
+	analysis, err := parseProjectAnalysis(scanResult)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse project scan: %w", err)
+	}
+
+	step("plan_create", func() (interface{}, error) {
+		desc := fmt.Sprintf("Plan for %s - %s architecture with %s",
+			analysis.Name, analysis.Architecture.Type, analysis.Stack.Language)
+		return s.callTool(ctx, "plan_create", map[string]interface{}{
+			"title":       params.Title,
+			"description": desc,
+		})
+	})
+
+	planResult := results["plan_create"]
+	planID := ""
+	if planMap, ok := planResult.(map[string]interface{}); ok {
+		if id, ok := planMap["id"].(string); ok {
+			planID = id
+		}
+	}
+
+	phaseTemplates := scanner.GeneratePhasesAndTasks(analysis)
+	recommendedAgents := scanner.GetRecommendedAgents(analysis)
+
+	phaseIDs := []string{}
+	taskIDs := []string{}
+
+	for i, template := range phaseTemplates {
+		phaseResult, err := s.callTool(ctx, "phase_create", map[string]interface{}{
+			"plan_id":   planID,
+			"title":     template.Name,
+			"order_num": i,
+		})
+		if err != nil {
+			steps = append(steps, WorkflowStep{Name: "phase_create:" + template.Name, Status: "error", Error: err.Error()})
+			continue
+		}
+
+		phaseID := ""
+		if phaseMap, ok := phaseResult.(map[string]interface{}); ok {
+			if id, ok := phaseMap["id"].(string); ok {
+				phaseID = id
+				phaseIDs = append(phaseIDs, id)
+			}
+		}
+
+		steps = append(steps, WorkflowStep{Name: "phase_create:" + template.Name, Status: "success", Output: phaseResult})
+
+		for _, taskTemplate := range template.Tasks {
+			agentIDsForTask := params.AgentIDs
+			if len(agentIDsForTask) == 0 {
+				for _, at := range taskTemplate.AgentTypes {
+					agentID := findAgentByType(at, recommendedAgents)
+					if agentID != "" {
+						agentIDsForTask = append(agentIDsForTask, agentID)
+					}
+				}
+			}
+
+			taskResult, err := s.callTool(ctx, "task_create", map[string]interface{}{
+				"phase_id":    phaseID,
+				"title":       taskTemplate.Title,
+				"description": taskTemplate.Description,
+				"priority":    taskTemplate.Priority,
+				"milestone":   taskTemplate.Milestone,
+			})
+			if err != nil {
+				steps = append(steps, WorkflowStep{Name: "task_create:" + taskTemplate.Title, Status: "error", Error: err.Error()})
+				continue
+			}
+
+			taskID := ""
+			if taskMap, ok := taskResult.(map[string]interface{}); ok {
+				if id, ok := taskMap["id"].(string); ok {
+					taskID = id
+					taskIDs = append(taskIDs, id)
+				}
+			}
+
+			if len(agentIDsForTask) > 0 {
+				s.callTool(ctx, "task_assign_agents", map[string]interface{}{
+					"task_id":   taskID,
+					"agent_ids": agentIDsForTask,
+					"role":      "worker",
+				})
+			}
+
+			steps = append(steps, WorkflowStep{Name: "task_create:" + taskTemplate.Title, Status: "success", Output: taskResult})
+		}
+	}
+
+	step("human_review_create", func() (interface{}, error) {
+		return s.callTool(ctx, "human_review_create", map[string]interface{}{
+			"review_type": "prd_approval",
+			"entity_type": "plan",
+			"entity_id":   planID,
+			"question":    fmt.Sprintf("¿Apruebas este plan de %d fases con %d tareas basado en tu stack de %s?", len(phaseIDs), len(taskIDs), analysis.Stack.Language),
+		})
+	})
+
+	return &Response{Result: map[string]interface{}{
+		"workflow":     "stack_based_init",
+		"status":       "completed",
+		"plan_id":      planID,
+		"phase_ids":    phaseIDs,
+		"task_ids":     taskIDs,
+		"stack":        analysis.Stack,
+		"architecture": analysis.Architecture,
+		"agents":       recommendedAgents,
+		"steps":        steps,
+		"results":      results,
+		"message":      fmt.Sprintf("Plan created with %d phases and %d tasks based on %s stack", len(phaseIDs), len(taskIDs), analysis.Stack.Language),
+	}}, nil
+}
+
+func (s *Server) handleWorkflowPlanDevelopV2(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		PlanID       string `json:"plan_id"`
+		AgentID      string `json:"agent_id,omitempty"`
+		AutoContinue bool   `json:"auto_continue,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	steps := []WorkflowStep{}
+
+	for {
+		taskResult, err := s.callTool(ctx, "task_get_next", map[string]interface{}{
+			"plan_id":  params.PlanID,
+			"agent_id": params.AgentID,
+		})
+		if err != nil {
+			steps = append(steps, WorkflowStep{Name: "task_get_next", Status: "error", Error: err.Error()})
+			break
+		}
+
+		taskMap, ok := taskResult.(map[string]interface{})
+		if !ok || taskMap == nil {
+			steps = append(steps, WorkflowStep{Name: "task_get_next", Status: "success", Output: "no more tasks"})
+			break
+		}
+
+		if allComplete, ok := taskMap["all_complete"].(bool); ok && allComplete {
+			steps = append(steps, WorkflowStep{Name: "task_get_next", Status: "success", Output: "all tasks complete"})
+			break
+		}
+
+		task, ok := taskMap["task"].(map[string]interface{})
+		if !ok {
+			break
+		}
+
+		taskID := task["id"].(string)
+		taskTitle := task["title"].(string)
+		taskAgents, _ := task["task_agents"].([]interface{})
+
+		steps = append(steps, WorkflowStep{Name: "task_start:" + taskTitle, Status: "in_progress"})
+
+		if len(taskAgents) > 0 {
+			for _, ta := range taskAgents {
+				taMap, ok := ta.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				execResult, err := s.callTool(ctx, "task_execute", map[string]interface{}{
+					"task_id":  taskID,
+					"agent_id": taMap["agent_id"],
+				})
+				if err != nil {
+					steps = append(steps, WorkflowStep{Name: "task_delegate:" + taskTitle, Status: "error", Error: err.Error()})
+				} else {
+					steps = append(steps, WorkflowStep{Name: "task_delegate:" + taskTitle, Status: "success", Output: execResult})
+				}
+			}
+		} else {
+			s.callTool(ctx, "task_update", map[string]interface{}{
+				"task_id": taskID,
+				"status":  "in_progress",
+			})
+		}
+
+		if task["milestone"] == true {
+			s.callTool(ctx, "checkpoint_open", map[string]interface{}{
+				"plan_id":     params.PlanID,
+				"description": "Milestone: " + taskTitle,
+			})
+			s.callTool(ctx, "human_review_create", map[string]interface{}{
+				"review_type": "checkpoint_approval",
+				"entity_type": "checkpoint",
+				"entity_id":   params.PlanID,
+				"question":    "¿Aprobar este checkpoint de milestone?",
+			})
+		}
+
+		if !params.AutoContinue {
+			break
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	planProgress, _ := s.callTool(ctx, "plan_progress", map[string]interface{}{"plan_id": params.PlanID})
+
+	return &Response{Result: map[string]interface{}{
+		"workflow": "plan_develop_v2",
+		"status":   "completed",
+		"progress": planProgress,
+		"steps":    steps,
+	}}, nil
+}
+
+func parseProjectAnalysis(result interface{}) (*scanner.ProjectAnalysis, error) {
+	resultMap, ok := result.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid result type")
+	}
+
+	analysis := &scanner.ProjectAnalysis{}
+
+	if name, ok := resultMap["name"].(string); ok {
+		analysis.Name = name
+	}
+	if path, ok := resultMap["path"].(string); ok {
+		analysis.Path = path
+	}
+
+	if stackMap, ok := resultMap["stack"].(map[string]interface{}); ok {
+		analysis.Stack = &scanner.StackInfo{}
+		if lang, ok := stackMap["language"].(string); ok {
+			analysis.Stack.Language = lang
+		}
+		if fw, ok := stackMap["framework"].(string); ok {
+			analysis.Stack.Framework = fw
+		}
+		if pkg, ok := stackMap["package_manager"].(string); ok {
+			analysis.Stack.PackageMgr = pkg
+		}
+		if ci, ok := stackMap["ci_tool"].(string); ok {
+			analysis.Stack.CITool = ci
+		}
+		if db, ok := stackMap["db_engine"].(string); ok {
+			analysis.Stack.DBEngine = db
+		}
+		if hasDocker, ok := stackMap["has_docker"].(bool); ok {
+			analysis.Stack.HasDocker = hasDocker
+		}
+		if hasCI, ok := stackMap["has_ci"].(bool); ok {
+			analysis.Stack.HasCI = hasCI
+		}
+		if hasTests, ok := stackMap["has_tests"].(bool); ok {
+			analysis.Stack.HasTests = hasTests
+		}
+	}
+
+	if archMap, ok := resultMap["architecture"].(map[string]interface{}); ok {
+		analysis.Architecture = &scanner.ArchitectureInfo{}
+		if archType, ok := archMap["type"].(string); ok {
+			analysis.Architecture.Type = archType
+		}
+		if hasAPI, ok := archMap["has_api"].(bool); ok {
+			analysis.Architecture.HasAPI = hasAPI
+		}
+		if hasFE, ok := archMap["has_frontend"].(bool); ok {
+			analysis.Architecture.HasFrontend = hasFE
+		}
+		if isMono, ok := archMap["is_monorepo"].(bool); ok {
+			analysis.Architecture.IsMonorepo = isMono
+		}
+		if feLib, ok := archMap["frontend_lib"].(string); ok {
+			analysis.Architecture.FrontendLib = feLib
+		}
+		if apiFW, ok := archMap["api_framework"].(string); ok {
+			analysis.Architecture.APIFramework = apiFW
+		}
+	}
+
+	return analysis, nil
+}
+
+func findAgentByType(agentType string, agents []map[string]string) string {
+	for _, agent := range agents {
+		if agent["type"] == agentType {
+			return agent["name"]
+		}
+	}
+	return ""
 }

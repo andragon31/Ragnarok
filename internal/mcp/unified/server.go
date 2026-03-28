@@ -161,6 +161,16 @@ func (s *Server) registerWorkflowHandlers() {
 			schema: `{"type":"object","properties":{"plan_id":{"type":"string"},"agent_id":{"type":"string"},"auto_continue":{"type":"boolean"}},"required":["plan_id"]}`,
 			fn:     s.handleWorkflowPlanDevelop,
 		},
+		"workflow_plan_develop_v2": {
+			desc:   "Execute development with multi-agent task delegation",
+			schema: `{"type":"object","properties":{"plan_id":{"type":"string"},"agent_id":{"type":"string"},"auto_continue":{"type":"boolean"}},"required":["plan_id"]}`,
+			fn:     s.handleWorkflowPlanDevelopV2,
+		},
+		"workflow_stack_based_init": {
+			desc:   "Initialize project with stack-based phases and tasks",
+			schema: `{"type":"object","properties":{"project_path":{"type":"string"},"title":{"type":"string"},"phases":{"type":"array","items":{"type":"string"}},"agent_ids":{"type":"array","items":{"type":"string"}}},"required":["project_path"]}`,
+			fn:     s.handleWorkflowStackBasedInit,
+		},
 		"workflow_session_start": {
 			desc:   "Start a work session with full context",
 			schema: `{"type":"object","properties":{"goal":{"type":"string"},"module":{"type":"string"},"project_path":{"type":"string"}},"required":["goal"]}`,
@@ -464,6 +474,13 @@ func getToolInputSchema(name string) string {
 		"agent_skills_get":         `{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"}},"required":["agent_id"]}`,
 		"team_create":              `{"type":"object","properties":{"name":{"type":"string","description":"Team name"},"project_path":{"type":"string","description":"Project path"},"agent_ids":{"type":"array","items":{"type":"string"},"description":"Agent IDs"}},"required":["name"]}`,
 		"team_get":                 `{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`,
+		"task_execute":             `{"type":"object","properties":{"task_id":{"type":"string","description":"Task ID"},"hati_task_id":{"type":"string","description":"Hati Task ID"},"agent_id":{"type":"string","description":"Agent ID"},"phase_id":{"type":"string","description":"Phase ID"}},"required":["task_id","agent_id"]}`,
+		"task_delegate":            `{"type":"object","properties":{"task_id":{"type":"string","description":"Task ID"},"hati_task_id":{"type":"string","description":"Hati Task ID"},"agent_ids":{"type":"array","items":{"type":"string"},"description":"Agent IDs"},"phase_id":{"type":"string","description":"Phase ID"}},"required":["task_id","agent_ids"]}`,
+		"task_status":              `{"type":"object","properties":{"execution_id":{"type":"string","description":"Execution ID"},"task_id":{"type":"string","description":"Task ID"},"agent_id":{"type":"string","description":"Agent ID"}}}`,
+		"task_heartbeat":           `{"type":"object","properties":{"execution_id":{"type":"string","description":"Execution ID"}},"required":["execution_id"]}`,
+		"task_complete":            `{"type":"object","properties":{"execution_id":{"type":"string","description":"Execution ID"},"status":{"type":"string","enum":["completed","failed"]},"result":{"type":"string","description":"Result"},"error":{"type":"string","description":"Error"}},"required":["execution_id"]}`,
+		"task_cancel":              `{"type":"object","properties":{"execution_id":{"type":"string","description":"Execution ID"},"reason":{"type":"string","description":"Reason for cancellation"}},"required":["execution_id"]}`,
+		"workflow_deprecate":       `{"type":"object","properties":{"workflow_id":{"type":"string","description":"Workflow ID"}},"required":["workflow_id"]}`,
 	}
 	if schema, ok := schemas[name]; ok {
 		return schema
