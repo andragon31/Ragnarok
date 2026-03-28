@@ -8,6 +8,29 @@ import (
 	"time"
 )
 
+func columnExists(db *sql.DB, table, column string) bool {
+	query := fmt.Sprintf("PRAGMA table_info(%s)", table)
+	rows, err := db.Query(query)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt_value interface{}
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt_value, &pk); err != nil {
+			continue
+		}
+		if name == column {
+			return true
+		}
+	}
+	return false
+}
+
 type SpecializedAgent struct {
 	ID            string    `json:"id"`
 	Name          string    `json:"name"`
@@ -108,9 +131,22 @@ func (s *Server) handleAgentCreate(ctx context.Context, req *Request) (*Response
 	skillsJSON, _ := json.Marshal(skills)
 	capabilitiesJSON, _ := json.Marshal(capabilities)
 
-	query := `INSERT INTO agents (id, name, role, scope, skills, allowed_tools, capabilities, status, created_at, updated_at)
-			  VALUES (?, ?, ?, ?, ?, '', ?, 'idle', ?, ?)`
-	_, err := s.db.Exec(query, agentID, params.Name, role, scope, string(skillsJSON), string(capabilitiesJSON), now, now)
+	hasCapabilities := columnExists(s.db, "agents", "capabilities")
+
+	var query string
+	var args []interface{}
+
+	if hasCapabilities {
+		query = `INSERT INTO agents (id, name, role, scope, skills, allowed_tools, capabilities, status, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, '', ?, 'idle', ?, ?)`
+		args = []interface{}{agentID, params.Name, role, scope, string(skillsJSON), string(capabilitiesJSON), now, now}
+	} else {
+		query = `INSERT INTO agents (id, name, role, scope, skills, allowed_tools, status, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, '', 'idle', ?, ?)`
+		args = []interface{}{agentID, params.Name, role, scope, string(skillsJSON), now, now}
+	}
+
+	_, err := s.db.Exec(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
@@ -137,20 +173,35 @@ func (s *Server) handleAgentGet(ctx context.Context, req *Request) (*Response, e
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
-	query := `SELECT id, name, role, scope, skills, allowed_tools, capabilities, status, current_task, last_heartbeat, created_at
-			  FROM agents WHERE id = ?`
 	agent := &SpecializedAgent{}
 	var skillsJSON, capabilitiesJSON sql.NullString
 	var currentTask sql.NullString
 	var lastHeartbeat sql.NullTime
 
-	err := s.db.QueryRow(query, params.AgentID).Scan(
-		&agent.ID, &agent.Name, &agent.Role, &agent.Scope,
-		&skillsJSON, &agent.AllowedTools, &capabilitiesJSON,
-		&agent.Status, &currentTask, &lastHeartbeat, &agent.CreatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("agent not found: %w", err)
+	hasCapabilities := columnExists(s.db, "agents", "capabilities")
+
+	if hasCapabilities {
+		query := `SELECT id, name, role, scope, skills, allowed_tools, capabilities, status, current_task, last_heartbeat, created_at
+				  FROM agents WHERE id = ?`
+		err := s.db.QueryRow(query, params.AgentID).Scan(
+			&agent.ID, &agent.Name, &agent.Role, &agent.Scope,
+			&skillsJSON, &agent.AllowedTools, &capabilitiesJSON,
+			&agent.Status, &currentTask, &lastHeartbeat, &agent.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("agent not found: %w", err)
+		}
+	} else {
+		query := `SELECT id, name, role, scope, skills, allowed_tools, status, current_task, last_heartbeat, created_at
+				  FROM agents WHERE id = ?`
+		err := s.db.QueryRow(query, params.AgentID).Scan(
+			&agent.ID, &agent.Name, &agent.Role, &agent.Scope,
+			&skillsJSON, &agent.AllowedTools,
+			&agent.Status, &currentTask, &lastHeartbeat, &agent.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("agent not found: %w", err)
+		}
 	}
 
 	if skillsJSON.Valid {
