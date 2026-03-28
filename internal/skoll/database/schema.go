@@ -119,6 +119,23 @@ func InitSchema(db *sql.DB) error {
 		phases TEXT,
 		standards TEXT,
 		is_active INTEGER DEFAULT 1,
+		deprecated INTEGER DEFAULT 0,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS task_executions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		hati_task_id TEXT,
+		agent_id TEXT NOT NULL,
+		phase_id TEXT,
+		status TEXT DEFAULT 'pending',
+		result TEXT,
+		error TEXT,
+		started_at DATETIME NOT NULL,
+		completed_at DATETIME,
+		heartbeat_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -148,6 +165,10 @@ func InitSchema(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_rules_active ON rules(is_active);
 	CREATE INDEX IF NOT EXISTS idx_agents_active ON agents(is_active);
 	CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
+	CREATE INDEX IF NOT EXISTS idx_task_executions_task ON task_executions(task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_executions_agent ON task_executions(agent_id);
+	CREATE INDEX IF NOT EXISTS idx_task_executions_status ON task_executions(status);
+	CREATE INDEX IF NOT EXISTS idx_workflows_deprecated ON workflows(deprecated);
 	`
 
 	_, err := db.Exec(schema)

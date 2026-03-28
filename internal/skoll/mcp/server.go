@@ -118,6 +118,14 @@ func (s *Server) registerHandlers() {
 	s.handlers["workflow_step"] = s.handleWorkflowStep
 	s.handlers["workflow_status"] = s.handleWorkflowStatus
 	s.handlers["workflow_complete"] = s.handleWorkflowComplete
+	s.handlers["workflow_deprecate"] = s.handleWorkflowDeprecate
+
+	s.handlers["task_execute"] = s.handleTaskExecute
+	s.handlers["task_delegate"] = s.handleTaskDelegate
+	s.handlers["task_status"] = s.handleTaskStatus
+	s.handlers["task_heartbeat"] = s.handleTaskHeartbeat
+	s.handlers["task_complete"] = s.handleTaskComplete
+	s.handlers["task_cancel"] = s.handleTaskCancel
 
 	s.handlers["skoll_status"] = s.handleSkollStatus
 	s.handlers["skoll_validate"] = s.handleSkollValidate

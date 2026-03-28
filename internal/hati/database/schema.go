@@ -235,7 +235,7 @@ func InitSchema(db *sql.DB) error {
 		description TEXT,
 		status TEXT DEFAULT 'pending',
 		priority INTEGER DEFAULT 0,
-		assigned_agent_id TEXT,
+		assigned_agent_ids TEXT,
 		assigned_agent_type TEXT,
 		estimated_hours REAL,
 		actual_hours REAL,
@@ -248,6 +248,19 @@ func InitSchema(db *sql.DB) error {
 		updated_at DATETIME NOT NULL,
 		FOREIGN KEY (phase_id) REFERENCES phases(id),
 		FOREIGN KEY (prd_requirement_id) REFERENCES prd_requirements(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS task_agents (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		role TEXT DEFAULT 'worker',
+		status TEXT DEFAULT 'pending',
+		started_at DATETIME,
+		completed_at DATETIME,
+		result TEXT,
+		error TEXT,
+		FOREIGN KEY (task_id) REFERENCES tasks(id)
 	);
 
 	CREATE TABLE IF NOT EXISTS human_reviews (
@@ -295,9 +308,10 @@ func InitSchema(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_prd_requirements_prd ON prd_requirements(prd_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_phase ON tasks(phase_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-	CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_agent_id);
 	CREATE INDEX IF NOT EXISTS idx_human_reviews_entity ON human_reviews(entity_type, entity_id);
 	CREATE INDEX IF NOT EXISTS idx_human_reviews_status ON human_reviews(status);
+	CREATE INDEX IF NOT EXISTS idx_task_agents_task ON task_agents(task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_agents_agent ON task_agents(agent_id);
 	`
 
 	_, err := db.Exec(schema)

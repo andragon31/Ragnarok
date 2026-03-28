@@ -1,8 +1,8 @@
-# Ragnarok Ecosystem v1.4.0
+# Ragnarok Ecosystem v2.0.0
 
 **AI Governance & Autonomous Development Ecosystem**
 
-Sistema agentico de 4 plugins MCP diseñados para orchestrar agentes AI en proyectos de desarrollo, con workflows automatizados y validación humana en puntos clave.
+Sistema agentico de 4 plugins MCP diseñados para orchestrar agentes AI en proyectos de desarrollo, con **Agent-Based Orchestration** y validación humana en puntos clave.
 
 ---
 
@@ -18,16 +18,17 @@ graph LR
         Plan[Plan de Desarrollo]
         Phases[Fases]
         Tasks[Tareas]
+        MultiAgent[Multi-Agent Tasks]
         HumanReview[👤 Human-in-the-Loop]
     end
     
-    HATI --> |"Tareas"| SKOLL
+    HATI --> |"Tareas Multi-Agente"| SKOLL
     
-    subgraph SKOLL["⚙️ SKOLL - Agents"]
-        Backend[Backend Agent]
-        Frontend[Frontend Agent]
-        QA[QA Agent]
-        DevOps[DevOps Agent]
+    subgraph SKOLL["⚙️ SKOLL - Orchestration"]
+        Agents[Agentes]
+        TaskExec[Task Executions]
+        Skills[Skills]
+        Rules[Rules]
     end
     
     SKOLL --> |"Memoria"| FENRIR
@@ -196,7 +197,7 @@ graph TD
 ## Instalación
 
 ```powershell
-irm https://raw.githubusercontent.com/andragon31/Ragnarok/v1.4.0/install.ps1 | iex
+irm https://raw.githubusercontent.com/andragon31/Ragnarok/v2.0.0/install.ps1 | iex
 ```
 
 ## Uso Rápido
@@ -211,9 +212,16 @@ workflow_prd_analyze --prd_file "./PRD.md" --project_path "./mi-proyecto"
 # 3. Inicializar agentes
 workflow_agentic_init --title "MiApp" --phases "Backend,Frontend,Testing"
 
-# 4. Ejecutar desarrollo
+# 4. Ejecutar desarrollo (delegación directa a agentes)
 workflow_plan_develop --plan_id "plan_xxx" --auto_continue true
 ```
+
+### Novedades v2.0.0
+
+- **Multi-Agent Tasks**: Las tareas pueden asignarse a múltiples agentes simultáneamente
+- **Agent-Based Orchestration**: Skoll delega directamente a agentes sin workflows
+- **Task Executions**: Tracking granular de cada ejecución de tarea por agente
+- **Workflows Deprecated**: Los workflows se reemplazan por task_* commands
 
 ---
 
@@ -222,8 +230,8 @@ workflow_plan_develop --plan_id "plan_xxx" --auto_continue true
 | Plugin | Herramientas |
 |--------|-------------|
 | **Fenrir** | `mem_stats`, `mem_timeline`, `mem_context`, `mem_find`, `mem_save` |
-| **Hati** | `plan_get`, `plan_list`, `task_create`, `task_get_next`, `task_update` |
-| **Skoll** | `skill_list`, `agent_list`, `agent_create`, `team_register` |
+| **Hati** | `plan_get`, `plan_list`, `task_create`, `task_get_next`, `task_update`, `task_assign_agents`, `task_agent_update` |
+| **Skoll** | `skill_list`, `agent_list`, `agent_create`, `team_register`, `task_execute`, `task_delegate`, `task_status` |
 | **Tyr** | `standard_run_all`, `sast_run`, `pkg_check`, `precommit_validate` |
 
 ---
@@ -256,4 +264,4 @@ workflow_plan_develop --plan_id "plan_xxx" --auto_continue true
 
 ---
 
-**v1.4.0** - Arquitectura Agentica con Human-in-the-Loop
+**v2.0.0** - Agent-Based Orchestration con Multi-Agent Tasks

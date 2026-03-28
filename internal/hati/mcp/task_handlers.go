@@ -19,7 +19,7 @@ type Task struct {
 	Description       string     `json:"description,omitempty"`
 	Status            string     `json:"status"`
 	Priority          int        `json:"priority"`
-	AssignedAgentID   string     `json:"assigned_agent_id,omitempty"`
+	AssignedAgentIDs  []string   `json:"assigned_agent_ids,omitempty"`
 	AssignedAgentType string     `json:"assigned_agent_type,omitempty"`
 	EstimatedHours    float64    `json:"estimated_hours,omitempty"`
 	ActualHours       float64    `json:"actual_hours,omitempty"`
@@ -30,6 +30,18 @@ type Task struct {
 	CompletedAt       *time.Time `json:"completed_at,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+type TaskAgent struct {
+	ID          string     `json:"id"`
+	TaskID      string     `json:"task_id"`
+	AgentID     string     `json:"agent_id"`
+	Role        string     `json:"role"`
+	Status      string     `json:"status"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	Result      string     `json:"result,omitempty"`
+	Error       string     `json:"error,omitempty"`
 }
 
 type PRD struct {
@@ -75,7 +87,7 @@ func (s *Server) handleTaskCreate(ctx context.Context, req *Request) (*Response,
 		Title             string   `json:"title"`
 		Description       string   `json:"description,omitempty"`
 		Priority          int      `json:"priority,omitempty"`
-		AssignedAgentID   string   `json:"assigned_agent_id,omitempty"`
+		AssignedAgentIDs  []string `json:"assigned_agent_ids,omitempty"`
 		AssignedAgentType string   `json:"assigned_agent_type,omitempty"`
 		EstimatedHours    float64  `json:"estimated_hours,omitempty"`
 		Milestone         bool     `json:"milestone,omitempty"`
@@ -97,24 +109,34 @@ func (s *Server) handleTaskCreate(ctx context.Context, req *Request) (*Response,
 	now := time.Now()
 
 	subtasksJSON, _ := json.Marshal(params.Subtasks)
+	agentIDsJSON, _ := json.Marshal(params.AssignedAgentIDs)
 
-	query := `INSERT INTO tasks (id, phase_id, prd_requirement_id, title, description, status, priority, assigned_agent_id, assigned_agent_type, estimated_hours, milestone, subtasks, created_at, updated_at)
+	query := `INSERT INTO tasks (id, phase_id, prd_requirement_id, title, description, status, priority, assigned_agent_ids, assigned_agent_type, estimated_hours, milestone, subtasks, created_at, updated_at)
 			  VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`
 	_, err := s.db.Exec(query, taskID, params.PhaseID, params.PRDRequirementID, params.Title, params.Description,
-		params.Priority, params.AssignedAgentID, params.AssignedAgentType, params.EstimatedHours,
+		params.Priority, string(agentIDsJSON), params.AssignedAgentType, params.EstimatedHours,
 		params.Milestone, string(subtasksJSON), now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create task: %w", err)
 	}
 
+	if len(params.AssignedAgentIDs) > 0 {
+		for _, agentID := range params.AssignedAgentIDs {
+			taID := generateID("taskagent")
+			insertQuery := `INSERT INTO task_agents (id, task_id, agent_id, role, status, started_at) VALUES (?, ?, ?, 'worker', 'pending', ?)`
+			s.db.Exec(insertQuery, taID, taskID, agentID, now)
+		}
+	}
+
 	return &Response{
 		Result: map[string]interface{}{
-			"id":         taskID,
-			"phase_id":   params.PhaseID,
-			"title":      params.Title,
-			"status":     "pending",
-			"priority":   params.Priority,
-			"created_at": now,
+			"id":                 taskID,
+			"phase_id":           params.PhaseID,
+			"title":              params.Title,
+			"status":             "pending",
+			"priority":           params.Priority,
+			"assigned_agent_ids": params.AssignedAgentIDs,
+			"created_at":         now,
 		},
 	}, nil
 }
@@ -128,10 +150,10 @@ func (s *Server) handleTaskGet(ctx context.Context, req *Request) (*Response, er
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
-	query := `SELECT id, phase_id, prd_requirement_id, title, description, status, priority, assigned_agent_id, assigned_agent_type, estimated_hours, actual_hours, notes, blocker, milestone, subtasks, completed_at, created_at, updated_at
+	query := `SELECT id, phase_id, prd_requirement_id, title, description, status, priority, assigned_agent_ids, assigned_agent_type, estimated_hours, actual_hours, notes, blocker, milestone, subtasks, completed_at, created_at, updated_at
 			  FROM tasks WHERE id = ?`
 	task := &Task{}
-	var prdReqID, agentID, agentType, desc, notes, blocker sql.NullString
+	var prdReqID, agentIDsJSON, agentType, desc, notes, blocker sql.NullString
 	var estimated, actual sql.NullFloat64
 	var subtasks sql.NullString
 	var completedAt sql.NullTime
@@ -139,7 +161,7 @@ func (s *Server) handleTaskGet(ctx context.Context, req *Request) (*Response, er
 
 	err := s.db.QueryRow(query, params.TaskID).Scan(
 		&task.ID, &task.PhaseID, &prdReqID, &task.Title, &desc,
-		&task.Status, &task.Priority, &agentID, &agentType,
+		&task.Status, &task.Priority, &agentIDsJSON, &agentType,
 		&estimated, &actual, &notes, &blocker, &milestone,
 		&subtasks, &completedAt, &task.CreatedAt, &task.UpdatedAt,
 	)
@@ -151,7 +173,9 @@ func (s *Server) handleTaskGet(ctx context.Context, req *Request) (*Response, er
 	task.Description = desc.String
 	task.Notes = notes.String
 	task.Blocker = blocker.String
-	task.AssignedAgentID = agentID.String
+	if agentIDsJSON.Valid && agentIDsJSON.String != "" {
+		json.Unmarshal([]byte(agentIDsJSON.String), &task.AssignedAgentIDs)
+	}
 	task.AssignedAgentType = agentType.String
 	task.EstimatedHours = estimated.Float64
 	task.ActualHours = actual.Float64
@@ -163,7 +187,12 @@ func (s *Server) handleTaskGet(ctx context.Context, req *Request) (*Response, er
 		json.Unmarshal([]byte(subtasks.String), &task.Subtasks)
 	}
 
-	return &Response{Result: task}, nil
+	taskAgents, _ := s.getTaskAgents(params.TaskID)
+
+	return &Response{Result: map[string]interface{}{
+		"task":        task,
+		"task_agents": taskAgents,
+	}}, nil
 }
 
 func (s *Server) handleTaskGetNext(ctx context.Context, req *Request) (*Response, error) {
@@ -178,7 +207,7 @@ func (s *Server) handleTaskGetNext(ctx context.Context, req *Request) (*Response
 	}
 
 	query := `SELECT t.id, t.phase_id, t.prd_requirement_id, t.title, t.description, t.status, t.priority, 
-			  t.assigned_agent_id, t.assigned_agent_type, t.estimated_hours, t.actual_hours, t.notes, 
+			  t.assigned_agent_ids, t.assigned_agent_type, t.estimated_hours, t.actual_hours, t.notes, 
 			  t.blocker, t.milestone, t.subtasks, t.completed_at, t.created_at, t.updated_at, p.title as phase_title
 			  FROM tasks t
 			  JOIN phases p ON t.phase_id = p.id
@@ -187,7 +216,7 @@ func (s *Server) handleTaskGetNext(ctx context.Context, req *Request) (*Response
 			  LIMIT 1`
 
 	task := &Task{}
-	var prdReqID, agentID, agentType, desc, notes, blocker, phaseTitle sql.NullString
+	var prdReqID, agentIDsJSON, agentType, desc, notes, blocker, phaseTitle sql.NullString
 	var estimated, actual sql.NullFloat64
 	var subtasks sql.NullString
 	var completedAt sql.NullTime
@@ -195,7 +224,7 @@ func (s *Server) handleTaskGetNext(ctx context.Context, req *Request) (*Response
 
 	err := s.db.QueryRow(query, params.PlanID).Scan(
 		&task.ID, &task.PhaseID, &prdReqID, &task.Title, &desc,
-		&task.Status, &task.Priority, &agentID, &agentType,
+		&task.Status, &task.Priority, &agentIDsJSON, &agentType,
 		&estimated, &actual, &notes, &blocker, &milestone,
 		&subtasks, &completedAt, &task.CreatedAt, &task.UpdatedAt, &phaseTitle,
 	)
@@ -212,7 +241,9 @@ func (s *Server) handleTaskGetNext(ctx context.Context, req *Request) (*Response
 	task.Description = desc.String
 	task.Notes = notes.String
 	task.Blocker = blocker.String
-	task.AssignedAgentID = agentID.String
+	if agentIDsJSON.Valid && agentIDsJSON.String != "" {
+		json.Unmarshal([]byte(agentIDsJSON.String), &task.AssignedAgentIDs)
+	}
 	task.AssignedAgentType = agentType.String
 	task.EstimatedHours = estimated.Float64
 	task.ActualHours = actual.Float64
@@ -232,11 +263,10 @@ func (s *Server) handleTaskGetNext(ctx context.Context, req *Request) (*Response
 
 func (s *Server) handleTaskUpdate(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
-		TaskID          string  `json:"task_id"`
-		Status          string  `json:"status,omitempty"`
-		Notes           string  `json:"notes,omitempty"`
-		ActualHours     float64 `json:"actual_hours,omitempty"`
-		AssignedAgentID string  `json:"assigned_agent_id,omitempty"`
+		TaskID      string  `json:"task_id"`
+		Status      string  `json:"status,omitempty"`
+		Notes       string  `json:"notes,omitempty"`
+		ActualHours float64 `json:"actual_hours,omitempty"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -256,11 +286,10 @@ func (s *Server) handleTaskUpdate(ctx context.Context, req *Request) (*Response,
 	query := `UPDATE tasks SET status = COALESCE(NULLIF(?, ''), status), 
 			  notes = COALESCE(NULLIF(?, ''), notes),
 			  actual_hours = CASE WHEN ? > 0 THEN ? ELSE actual_hours END,
-			  assigned_agent_id = COALESCE(NULLIF(?, ''), assigned_agent_id),
 			  completed_at = COALESCE(?, completed_at),
 			  updated_at = ?
 			  WHERE id = ?`
-	_, err := s.db.Exec(query, params.Status, params.Notes, params.ActualHours, params.ActualHours, params.AssignedAgentID, completedAt, now, params.TaskID)
+	_, err := s.db.Exec(query, params.Status, params.Notes, params.ActualHours, params.ActualHours, completedAt, now, params.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update task: %w", err)
 	}
@@ -326,7 +355,7 @@ func (s *Server) handleTaskList(ctx context.Context, req *Request) (*Response, e
 	}
 
 	query := `SELECT t.id, t.phase_id, t.prd_requirement_id, t.title, t.description, t.status, t.priority, 
-			  t.assigned_agent_id, t.assigned_agent_type, t.milestone, t.blocker, t.completed_at, t.created_at
+			  t.assigned_agent_ids, t.assigned_agent_type, t.milestone, t.blocker, t.completed_at, t.created_at
 			  FROM tasks t`
 	var args []interface{}
 	var conditions []string
@@ -363,14 +392,19 @@ func (s *Server) handleTaskList(ctx context.Context, req *Request) (*Response, e
 
 	tasks := []map[string]interface{}{}
 	for rows.Next() {
-		var id, phaseID, prdReqID, title, agentID, agentType, blocker sql.NullString
+		var id, phaseID, prdReqID, title, agentIDsJSON, agentType, blocker sql.NullString
 		var status string
 		var priority, milestone int
 		var completedAt sql.NullTime
 		var createdAt time.Time
 
-		if err := rows.Scan(&id, &phaseID, &prdReqID, &title, &status, &priority, &agentID, &agentType, &milestone, &blocker, &completedAt, &createdAt); err != nil {
+		if err := rows.Scan(&id, &phaseID, &prdReqID, &title, &status, &priority, &agentIDsJSON, &agentType, &milestone, &blocker, &completedAt, &createdAt); err != nil {
 			continue
+		}
+
+		var agentIDs []string
+		if agentIDsJSON.Valid && agentIDsJSON.String != "" {
+			json.Unmarshal([]byte(agentIDsJSON.String), &agentIDs)
 		}
 
 		task := map[string]interface{}{
@@ -380,7 +414,7 @@ func (s *Server) handleTaskList(ctx context.Context, req *Request) (*Response, e
 			"title":      title.String,
 			"status":     status,
 			"priority":   priority,
-			"agent_id":   agentID.String,
+			"agent_ids":  agentIDs,
 			"agent_type": agentType.String,
 			"milestone":  milestone == 1,
 			"blocker":    blocker.String,
@@ -948,4 +982,162 @@ func osReadFile(path string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func (s *Server) getTaskAgents(taskID string) ([]TaskAgent, error) {
+	query := `SELECT id, task_id, agent_id, role, status, started_at, completed_at, result, error FROM task_agents WHERE task_id = ?`
+	rows, err := s.db.Query(query, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var agents []TaskAgent
+	for rows.Next() {
+		var ta TaskAgent
+		var role, result, errorMsg sql.NullString
+		var startedAt, completedAt sql.NullTime
+
+		if err := rows.Scan(&ta.ID, &ta.TaskID, &ta.AgentID, &role, &ta.Status, &startedAt, &completedAt, &result, &errorMsg); err != nil {
+			continue
+		}
+		ta.Role = role.String
+		ta.Result = result.String
+		ta.Error = errorMsg.String
+		if startedAt.Valid {
+			ta.StartedAt = &startedAt.Time
+		}
+		if completedAt.Valid {
+			ta.CompletedAt = &completedAt.Time
+		}
+		agents = append(agents, ta)
+	}
+	return agents, rows.Err()
+}
+
+func (s *Server) handleTaskAssignAgents(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		TaskID   string   `json:"task_id"`
+		AgentIDs []string `json:"agent_ids"`
+		Role     string   `json:"role,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.TaskID == "" {
+		return nil, fmt.Errorf("task_id is required")
+	}
+	if len(params.AgentIDs) == 0 {
+		return nil, fmt.Errorf("agent_ids are required")
+	}
+
+	now := time.Now()
+	role := params.Role
+	if role == "" {
+		role = "worker"
+	}
+
+	agentIDsJSON, _ := json.Marshal(params.AgentIDs)
+	updateQuery := `UPDATE tasks SET assigned_agent_ids = ?, updated_at = ? WHERE id = ?`
+	if _, err := s.db.Exec(updateQuery, string(agentIDsJSON), now, params.TaskID); err != nil {
+		return nil, fmt.Errorf("failed to update task agents: %w", err)
+	}
+
+	var assigned []map[string]interface{}
+	for _, agentID := range params.AgentIDs {
+		taID := generateID("taskagent")
+		insertQuery := `INSERT INTO task_agents (id, task_id, agent_id, role, status, started_at) VALUES (?, ?, ?, ?, 'assigned', ?)`
+		if _, err := s.db.Exec(insertQuery, taID, params.TaskID, agentID, role, now); err != nil {
+			return nil, fmt.Errorf("failed to assign agent %s: %w", agentID, err)
+		}
+		assigned = append(assigned, map[string]interface{}{
+			"task_agent_id": taID,
+			"agent_id":      agentID,
+			"role":          role,
+			"status":        "assigned",
+		})
+	}
+
+	return &Response{Result: map[string]interface{}{
+		"task_id":         params.TaskID,
+		"agents_assigned": assigned,
+		"updated_at":      now,
+	}}, nil
+}
+
+func (s *Server) handleTaskAgentUpdate(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		TaskAgentID string `json:"task_agent_id"`
+		Status      string `json:"status,omitempty"`
+		Result      string `json:"result,omitempty"`
+		Error       string `json:"error,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.TaskAgentID == "" {
+		return nil, fmt.Errorf("task_agent_id is required")
+	}
+
+	now := time.Now()
+	var completedAt *time.Time
+	if params.Status == "completed" || params.Status == "failed" {
+		completedAt = &now
+	}
+
+	query := `UPDATE task_agents SET status = COALESCE(NULLIF(?, ''), status), 
+			  result = COALESCE(NULLIF(?, ''), result),
+			  error = COALESCE(NULLIF(?, ''), error),
+			  completed_at = COALESCE(?, completed_at)
+			  WHERE id = ?`
+	_, err := s.db.Exec(query, params.Status, params.Result, params.Error, completedAt, params.TaskAgentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update task agent: %w", err)
+	}
+
+	if params.Status == "completed" || params.Status == "failed" {
+		var taskID string
+		s.db.QueryRow(`SELECT task_id FROM task_agents WHERE id = ?`, params.TaskAgentID).Scan(&taskID)
+		s.updateTaskStatusFromAgents(taskID)
+	}
+
+	return &Response{Result: map[string]interface{}{
+		"task_agent_id": params.TaskAgentID,
+		"status":        params.Status,
+		"updated_at":    now,
+	}}, nil
+}
+
+func (s *Server) updateTaskStatusFromAgents(taskID string) {
+	var pending, inProgress, completed, failed int
+	query := `SELECT 
+		SUM(CASE WHEN status = 'pending' OR status = 'assigned' THEN 1 ELSE 0 END) as pending,
+		SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+		SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+		SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+		FROM task_agents WHERE task_id = ?`
+	s.db.QueryRow(query, taskID).Scan(&pending, &inProgress, &completed, &failed)
+
+	var newStatus string
+	if failed > 0 {
+		newStatus = "blocked"
+	} else if completed > 0 && pending == 0 && inProgress == 0 {
+		newStatus = "completed"
+	} else if inProgress > 0 || pending > 0 {
+		newStatus = "in_progress"
+	}
+
+	if newStatus != "" {
+		now := time.Now()
+		var completedAt *time.Time
+		if newStatus == "completed" {
+			completedAt = &now
+		}
+		s.db.Exec(`UPDATE tasks SET status = ?, completed_at = COALESCE(?, completed_at), updated_at = ? WHERE id = ?`,
+			newStatus, completedAt, now, taskID)
+	}
 }
