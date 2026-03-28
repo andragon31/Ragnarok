@@ -386,29 +386,6 @@ func randomID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
-func columnExists(db *sql.DB, table, column string) bool {
-	query := fmt.Sprintf("PRAGMA table_info(%s)", table)
-	rows, err := db.Query(query)
-	if err != nil {
-		return false
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt_value interface{}
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt_value, &pk); err != nil {
-			continue
-		}
-		if name == column {
-			return true
-		}
-	}
-	return false
-}
-
 func indexExists(db *sql.DB, indexName string) bool {
 	query := `SELECT name FROM sqlite_master WHERE type='index' AND name=?`
 	var name string

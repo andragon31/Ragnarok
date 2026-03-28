@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 
 	_ "modernc.org/sqlite"
 )
@@ -23,6 +24,29 @@ func NewDB(path string) (*sql.DB, error) {
 	db.Exec("PRAGMA foreign_keys = ON")
 
 	return db, nil
+}
+
+func columnExists(db *sql.DB, table, column string) bool {
+	query := fmt.Sprintf("PRAGMA table_info(%s)", table)
+	rows, err := db.Query(query)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt_value interface{}
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt_value, &pk); err != nil {
+			continue
+		}
+		if name == column {
+			return true
+		}
+	}
+	return false
 }
 
 func InitSchema(db *sql.DB) error {
@@ -321,5 +345,49 @@ func InitSchema(db *sql.DB) error {
 		return fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
+	if err := runMigrations(db); err != nil {
+		log.Printf("Warning: migrations failed: %v", err)
+	}
+
 	return nil
+}
+
+func runMigrations(db *sql.DB) error {
+	migrations := []struct {
+		table  string
+		column string
+		addSQL string
+	}{
+		{"tasks", "assigned_agent_type", `ALTER TABLE tasks ADD COLUMN assigned_agent_type TEXT`},
+		{"tasks", "blocker", `ALTER TABLE tasks ADD COLUMN blocker TEXT`},
+		{"task_agents", "started_at", `ALTER TABLE task_agents ADD COLUMN started_at DATETIME`},
+		{"task_agents", "completed_at", `ALTER TABLE task_agents ADD COLUMN completed_at DATETIME`},
+		{"task_agents", "result", `ALTER TABLE task_agents ADD COLUMN result TEXT`},
+		{"task_agents", "error", `ALTER TABLE task_agents ADD COLUMN error TEXT`},
+		{"phases", "risk_level", `ALTER TABLE phases ADD COLUMN risk_level TEXT DEFAULT 'medium'`},
+	}
+
+	for _, m := range migrations {
+		if !columnExists(db, m.table, m.column) {
+			_, err := db.Exec(m.addSQL)
+			if err != nil && !contains(err.Error(), "duplicate column") && !contains(err.Error(), "already exists") {
+				log.Printf("Migration warning for %s.%s: %v", m.table, m.column, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
