@@ -528,11 +528,11 @@ func (s *Server) handlePlanProgress(ctx context.Context, req *Request) (*Respons
 			 (SELECT COUNT(*) FROM phases WHERE plan_id = p.id) as phase_count,
 			 (SELECT COUNT(*) FROM phases WHERE plan_id = p.id AND status = 'completed') as completed_phases
 			 FROM plans p WHERE p.id = ?`
-	var planTitle, planStatus string
+	var planID, planTitle, planStatus string
 	var createdAt time.Time
 	var phaseCount, completedPhases int
 
-	if err := s.db.QueryRow(query, params.PlanID).Scan(&planTitle, &planStatus, &createdAt, &phaseCount, &completedPhases); err != nil {
+	if err := s.db.QueryRow(query, params.PlanID).Scan(&planID, &planTitle, &planStatus, &createdAt, &phaseCount, &completedPhases); err != nil {
 		return nil, fmt.Errorf("failed to get plan details: %w", err)
 	}
 
