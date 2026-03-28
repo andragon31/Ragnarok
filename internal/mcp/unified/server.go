@@ -3,10 +3,13 @@ package unified
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	fenrirconfig "github.com/andragon31/Ragnarok/internal/fenrir/config"
@@ -55,6 +58,13 @@ func NewServer(dataDir string) (*Server, error) {
 		dataDir = filepath.Join(home, ".ragnarok")
 	}
 
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create data directory %s: %w", dataDir, err)
+	}
+
+	log.Printf("Ragnarok unified server initializing...")
+	log.Printf("Data directory: %s", dataDir)
+
 	s := &Server{
 		handlers:      make(map[string]mcp.ToolHandler),
 		tools:         []Tool{},
@@ -63,77 +73,139 @@ func NewServer(dataDir string) (*Server, error) {
 		dbPaths:       make(map[string]string),
 	}
 
-	s.registerHandlers(dataDir)
+	if err := s.registerHandlers(dataDir); err != nil {
+		log.Printf("Warning: some plugins failed to initialize: %v", err)
+	}
+
+	log.Printf("Server initialized with %d tools", len(s.tools))
 
 	return s, nil
 }
 
-func (s *Server) registerHandlers(dataDir string) {
+func (s *Server) registerHandlers(dataDir string) error {
+	var errs []error
+
+	log.Printf("Initializing Fenrir...")
 	fCfg := &fenrirconfig.Config{DataDir: filepath.Join(dataDir, ".fenrir")}
 	fDB, err := fenrirdb.NewDB(filepath.Join(fCfg.DataDir, "fenrir.db"))
-	if err == nil {
-		fenrirdb.InitSchema(fDB)
-		s.dbPaths["fenrir"] = filepath.Join(fCfg.DataDir, "fenrir.db")
-		fSrv := fenrirmcp.NewServer(fCfg, fDB)
-		for k, v := range fSrv.Handlers() {
-			s.handlers[k] = v
-			s.tools = append(s.tools, Tool{
-				Name:        k,
-				Description: getToolDescription(k),
-				InputSchema: json.RawMessage(getToolInputSchema(k)),
-			})
+	if err != nil {
+		errs = append(errs, fmt.Errorf("fenrir: failed to open database: %w", err))
+		log.Printf("  Fenrir: ❌ failed to open database at %s", filepath.Join(fCfg.DataDir, "fenrir.db"))
+	} else {
+		if err := fenrirdb.InitSchema(fDB); err != nil {
+			errs = append(errs, fmt.Errorf("fenrir: failed to init schema: %w", err))
+			log.Printf("  Fenrir: ❌ failed to init schema: %v", err)
+		} else {
+			s.dbPaths["fenrir"] = filepath.Join(fCfg.DataDir, "fenrir.db")
+			fSrv := fenrirmcp.NewServer(fCfg, fDB)
+			for k, v := range fSrv.Handlers() {
+				s.handlers[k] = v
+				s.tools = append(s.tools, Tool{
+					Name:        k,
+					Description: getToolDescription(k),
+					InputSchema: json.RawMessage(getToolInputSchema(k)),
+				})
+			}
+			log.Printf("  Fenrir: ✅ initialized (%d handlers)", len(fSrv.Handlers()))
 		}
 	}
 
-	hCfg, _ := haticonfig.LoadConfig(filepath.Join(dataDir, ".hati"))
-	hDB, err := hatidb.NewDB(hCfg.DBPath())
-	if err == nil {
-		hatidb.InitSchema(hDB)
-		s.dbPaths["hati"] = hCfg.DBPath()
-		hSrv := hatimcp.NewServer(hCfg, hDB)
-		for k, v := range hSrv.Handlers() {
-			s.handlers[k] = v
-			s.tools = append(s.tools, Tool{
-				Name:        k,
-				Description: getToolDescription(k),
-				InputSchema: json.RawMessage(getToolInputSchema(k)),
-			})
+	log.Printf("Initializing Hati...")
+	hCfg, err := haticonfig.LoadConfig(filepath.Join(dataDir, ".hati"))
+	if err != nil {
+		errs = append(errs, fmt.Errorf("hati: failed to load config: %w", err))
+		log.Printf("  Hati: ❌ failed to load config: %v", err)
+	} else {
+		hDB, err := hatidb.NewDB(hCfg.DBPath())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("hati: failed to open database: %w", err))
+			log.Printf("  Hati: ❌ failed to open database at %s", hCfg.DBPath())
+		} else {
+			if err := hatidb.InitSchema(hDB); err != nil {
+				errs = append(errs, fmt.Errorf("hati: failed to init schema: %w", err))
+				log.Printf("  Hati: ❌ failed to init schema: %v", err)
+			} else {
+				s.dbPaths["hati"] = hCfg.DBPath()
+				hSrv := hatimcp.NewServer(hCfg, hDB)
+				for k, v := range hSrv.Handlers() {
+					s.handlers[k] = v
+					s.tools = append(s.tools, Tool{
+						Name:        k,
+						Description: getToolDescription(k),
+						InputSchema: json.RawMessage(getToolInputSchema(k)),
+					})
+				}
+				log.Printf("  Hati: ✅ initialized (%d handlers)", len(hSrv.Handlers()))
+			}
 		}
 	}
 
-	skCfg, _ := skollconfig.LoadConfig(filepath.Join(dataDir, ".skoll"))
-	skDB, err := skolldb.NewDB(skCfg.DBPath())
-	if err == nil {
-		skolldb.InitSchema(skDB)
-		s.dbPaths["skoll"] = skCfg.DBPath()
-		skSrv := skollmcp.NewServer(skCfg, skDB)
-		for k, v := range skSrv.Handlers() {
-			s.handlers[k] = v
-			s.tools = append(s.tools, Tool{
-				Name:        k,
-				Description: getToolDescription(k),
-				InputSchema: json.RawMessage(getToolInputSchema(k)),
-			})
+	log.Printf("Initializing Skoll...")
+	skCfg, err := skollconfig.LoadConfig(filepath.Join(dataDir, ".skoll"))
+	if err != nil {
+		errs = append(errs, fmt.Errorf("skoll: failed to load config: %w", err))
+		log.Printf("  Skoll: ❌ failed to load config: %v", err)
+	} else {
+		skDB, err := skolldb.NewDB(skCfg.DBPath())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("skoll: failed to open database: %w", err))
+			log.Printf("  Skoll: ❌ failed to open database at %s", skCfg.DBPath())
+		} else {
+			if err := skolldb.InitSchema(skDB); err != nil {
+				errs = append(errs, fmt.Errorf("skoll: failed to init schema: %w", err))
+				log.Printf("  Skoll: ❌ failed to init schema: %v", err)
+			} else {
+				s.dbPaths["skoll"] = skCfg.DBPath()
+				skSrv := skollmcp.NewServer(skCfg, skDB)
+				for k, v := range skSrv.Handlers() {
+					s.handlers[k] = v
+					s.tools = append(s.tools, Tool{
+						Name:        k,
+						Description: getToolDescription(k),
+						InputSchema: json.RawMessage(getToolInputSchema(k)),
+					})
+				}
+				log.Printf("  Skoll: ✅ initialized (%d handlers)", len(skSrv.Handlers()))
+			}
 		}
 	}
 
-	tCfg, _ := tyrconfig.LoadConfig(filepath.Join(dataDir, ".tyr"))
-	tDB, err := tyrdb.NewDB(tCfg.DBPath())
-	if err == nil {
-		tyrdb.InitSchema(tDB)
-		s.dbPaths["tyr"] = tCfg.DBPath()
-		tSrv := tyrmcp.NewServer(tCfg, tDB)
-		for k, v := range tSrv.Handlers() {
-			s.handlers[k] = v
-			s.tools = append(s.tools, Tool{
-				Name:        k,
-				Description: getToolDescription(k),
-				InputSchema: json.RawMessage(getToolInputSchema(k)),
-			})
+	log.Printf("Initializing Tyr...")
+	tCfg, err := tyrconfig.LoadConfig(filepath.Join(dataDir, ".tyr"))
+	if err != nil {
+		errs = append(errs, fmt.Errorf("tyr: failed to load config: %w", err))
+		log.Printf("  Tyr: ❌ failed to load config: %v", err)
+	} else {
+		tDB, err := tyrdb.NewDB(tCfg.DBPath())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("tyr: failed to open database: %w", err))
+			log.Printf("  Tyr: ❌ failed to open database at %s", tCfg.DBPath())
+		} else {
+			if err := tyrdb.InitSchema(tDB); err != nil {
+				errs = append(errs, fmt.Errorf("tyr: failed to init schema: %w", err))
+				log.Printf("  Tyr: ❌ failed to init schema: %v", err)
+			} else {
+				s.dbPaths["tyr"] = tCfg.DBPath()
+				tSrv := tyrmcp.NewServer(tCfg, tDB)
+				for k, v := range tSrv.Handlers() {
+					s.handlers[k] = v
+					s.tools = append(s.tools, Tool{
+						Name:        k,
+						Description: getToolDescription(k),
+						InputSchema: json.RawMessage(getToolInputSchema(k)),
+					})
+				}
+				log.Printf("  Tyr: ✅ initialized (%d handlers)", len(tSrv.Handlers()))
+			}
 		}
 	}
 
 	s.registerWorkflowHandlers()
+
+	if len(errs) > 0 {
+		return fmt.Errorf("plugin initialization errors: %v", errs)
+	}
+	return nil
 }
 
 func (s *Server) registerWorkflowHandlers() {
@@ -565,7 +637,16 @@ func (s *Server) Run(ctx context.Context) error {
 		default:
 			var raw json.RawMessage
 			if err := decoder.Decode(&raw); err != nil {
-				return err
+				if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+					log.Printf("Client disconnected, shutting down gracefully")
+					return nil
+				}
+				if strings.Contains(err.Error(), "closed") || strings.Contains(err.Error(), "EOF") {
+					log.Printf("Connection closed by client")
+					return nil
+				}
+				log.Printf("Decode error: %v", err)
+				continue
 			}
 
 			var baseReq struct {

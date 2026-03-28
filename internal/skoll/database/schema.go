@@ -28,7 +28,7 @@ func NewDB(path string) (*sql.DB, error) {
 }
 
 func InitSchema(db *sql.DB) error {
-	schema := `
+	tables := `
 	CREATE TABLE IF NOT EXISTS skills (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL UNIQUE,
@@ -172,16 +172,34 @@ func InitSchema(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_task_executions_task ON task_executions(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_executions_agent ON task_executions(agent_id);
 	CREATE INDEX IF NOT EXISTS idx_task_executions_status ON task_executions(status);
-	CREATE INDEX IF NOT EXISTS idx_workflows_deprecated ON workflows(deprecated);
 	`
 
-	_, err := db.Exec(schema)
+	indexes := `
+	CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
+	CREATE INDEX IF NOT EXISTS idx_skills_framework ON skills(framework);
+	CREATE INDEX IF NOT EXISTS idx_skills_source ON skills(source);
+	CREATE INDEX IF NOT EXISTS idx_rules_category ON rules(category);
+	CREATE INDEX IF NOT EXISTS idx_rules_active ON rules(is_active);
+	CREATE INDEX IF NOT EXISTS idx_agents_active ON agents(is_active);
+	CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
+	CREATE INDEX IF NOT EXISTS idx_task_executions_task ON task_executions(task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_executions_agent ON task_executions(task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_executions_status ON task_executions(status);
+	`
+
+	_, err := db.Exec(tables)
 	if err != nil {
 		return fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
 	if err := runMigrations(db); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	db.Exec(indexes)
+
+	if columnExists(db, "workflows", "deprecated") {
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_workflows_deprecated ON workflows(deprecated)`)
 	}
 
 	return nil
@@ -197,6 +215,7 @@ func runMigrations(db *sql.DB) error {
 		{"agents", "capabilities", "TEXT", `ALTER TABLE agents ADD COLUMN capabilities TEXT`},
 		{"agents", "agent_type", "TEXT", `ALTER TABLE agents ADD COLUMN agent_type TEXT`},
 		{"agents", "allowed_tools", "TEXT", `ALTER TABLE agents ADD COLUMN allowed_tools TEXT`},
+		{"workflows", "deprecated", "INTEGER", `ALTER TABLE workflows ADD COLUMN deprecated INTEGER DEFAULT 0`},
 	}
 
 	for _, m := range migrations {

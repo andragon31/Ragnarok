@@ -7,15 +7,20 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
 	fenrircli "github.com/andragon31/Ragnarok/internal/fenrir/cli"
+	fenrirdb "github.com/andragon31/Ragnarok/internal/fenrir/database"
+	hatidb "github.com/andragon31/Ragnarok/internal/hati/database"
 	"github.com/andragon31/Ragnarok/internal/installer/installer"
 	"github.com/andragon31/Ragnarok/internal/installer/integration"
 	"github.com/andragon31/Ragnarok/internal/mcp/unified"
+	skolldb "github.com/andragon31/Ragnarok/internal/skoll/database"
+	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
 var version = "2.2.2"
@@ -121,6 +126,10 @@ func main() {
 	resetForce := resetCmd.Bool("force", false, "Skip confirmation prompt")
 	resetDBs := resetCmd.String("db", "all", "Databases to reset: all, hati, skoll, fenrir, tyr (comma-separated)")
 
+	reinstallCmd := flag.NewFlagSet("reinstall", flag.ExitOnError)
+	reinstallBackup := reinstallCmd.Bool("backup", true, "Backup before reinstalling")
+	reinstallForce := reinstallCmd.Bool("force", false, "Skip confirmation prompt")
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
@@ -193,6 +202,9 @@ func main() {
 	case "reset":
 		resetCmd.Parse(os.Args[2:])
 		runReset(*resetForce, *resetDBs)
+	case "reinstall":
+		reinstallCmd.Parse(os.Args[2:])
+		runReinstall(*reinstallBackup, *reinstallForce)
 	case "version":
 		fmt.Printf("Ragnarok v%s\n", version)
 		fmt.Println("AI Governance & Memory Layer Ecosystem")
@@ -572,8 +584,9 @@ Usage:
   rag install --project NAME [--mcp]     Install Ragnarok
   rag serve                              Start unified MCP server (stdio)
   rag mcp                                Alias for serve
-  rag setup --agent AGENT                Setup MCP for agent (opencode, cursor, windsurf)
+	rag setup --agent AGENT                Setup MCP for agent (opencode, cursor, windsurf)
   rag reset                              Reset all databases (DANGER!)
+  rag reinstall                          Complete reinstall from scratch (DANGER!)
   rag version                            Show version
 
 Project Workflows:
@@ -592,6 +605,8 @@ Execution:
 Maintenance:
   rag reset                             Reset all databases (requires confirmation)
   rag reset --force                     Reset without confirmation
+  rag reinstall                         Complete reinstall from scratch (keeps backup)
+  rag reinstall --force                  Complete reinstall without backup prompt
 
 Quick Setup:
   rag setup opencode     Configure OpenCode (most common)
@@ -1414,7 +1429,7 @@ func runReset(force bool, dbList string) {
 	}
 
 	home, _ := os.UserHomeDir()
-	baseDir := home
+	baseDir := filepath.Join(home, ".ragnarok")
 
 	folders := map[string]string{
 		"hati":   ".hati",
@@ -1426,6 +1441,10 @@ func runReset(force bool, dbList string) {
 	resetAll := dbList == "all"
 
 	fmt.Printf("\n🔄 Resetting Ragnarok databases...\n\n")
+
+	fmt.Println("📦 Stopping any running Ragnarok servers...")
+	stopRagnarokServers()
+	time.Sleep(1 * time.Second)
 
 	for name, folder := range folders {
 		if !resetAll && !contains(dbList, name) {
@@ -1443,8 +1462,155 @@ func runReset(force bool, dbList string) {
 		}
 	}
 
+	if resetAll {
+		fmt.Println("\n🗄️  Initializing databases...")
+		initializeDatabases(home)
+	}
+
 	fmt.Println("\n✓ Databases reset complete!")
 	fmt.Println("  Run 'rag serve' or 'rag mcp' to start with fresh databases.")
+}
+
+func runReinstall(withBackup, force bool) {
+	if !force {
+		fmt.Println("⚠️  This will COMPLETELY REMOVE all Ragnarok data and reinstall from scratch!")
+		fmt.Println("   All databases, sessions, plans, and configurations will be DELETED!")
+		fmt.Println("")
+		fmt.Print("Type 'yes' to confirm: ")
+		var confirm string
+		fmt.Scanln(&confirm)
+		if confirm != "yes" {
+			fmt.Println("Cancelled.")
+			os.Exit(0)
+		}
+	}
+
+	home, _ := os.UserHomeDir()
+	ragnarokDir := filepath.Join(home, ".ragnarok")
+
+	fmt.Printf("\n🔄 Complete Ragnarok Reinstallation...\n\n")
+
+	fmt.Println("📦 Stopping any running Ragnarok servers...")
+	stopRagnarokServers()
+
+	dirs := map[string]string{
+		".ragnarok": ragnarokDir,
+		".fenrir":   filepath.Join(ragnarokDir, ".fenrir"),
+		".hati":     filepath.Join(ragnarokDir, ".hati"),
+		".skoll":    filepath.Join(ragnarokDir, ".skoll"),
+		".tyr":      filepath.Join(ragnarokDir, ".tyr"),
+	}
+
+	if withBackup {
+		fmt.Println("\n💾 Creating backup...")
+		backupDir := filepath.Join(home, "OneDrive", "RagnarokBackups", time.Now().Format("2006-01-02_150405"))
+		os.MkdirAll(backupDir, 0755)
+		for name, dir := range dirs {
+			if _, err := os.Stat(dir); err == nil {
+				backupPath := filepath.Join(backupDir, name)
+				copyDir(dir, backupPath)
+				fmt.Printf("  ✅ Backed up %s -> %s\n", name, backupPath)
+			}
+		}
+		fmt.Printf("  Backup saved to: %s\n", backupDir)
+	}
+
+	fmt.Println("\n🗑️  Removing old data directories...")
+	for name, dir := range dirs {
+		if _, err := os.Stat(dir); err == nil {
+			os.RemoveAll(dir)
+			fmt.Printf("  ✅ Removed %s\n", name)
+		}
+	}
+
+	fmt.Println("\n✨ Creating fresh directory structure...")
+	for name, dir := range dirs {
+		os.MkdirAll(dir, 0755)
+		fmt.Printf("  ✅ Created %s\n", name)
+	}
+
+	fmt.Println("\n🗄️  Initializing databases...")
+	initializeDatabases(home)
+
+	fmt.Println("\n✅ Reinstallation complete!")
+	fmt.Println("   Run 'rag serve' or 'rag mcp' to start with fresh databases.")
+}
+
+func stopRagnarokServers() {
+	ports := []int{7437, 7438, 7439, 7440}
+	for _, port := range ports {
+		cmd := exec.Command("netstat", "-ano")
+		output, _ := cmd.Output()
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, fmt.Sprintf(":%d", port)) && strings.Contains(line, "LISTENING") {
+				parts := strings.Fields(line)
+				if len(parts) > 5 {
+					pid := parts[4]
+					exec.Command("taskkill", "/F", "/PID", pid).Run()
+				}
+			}
+		}
+	}
+}
+
+func initializeDatabases(home string) {
+	fenrirDir := filepath.Join(home, ".fenrir")
+	hatiDir := filepath.Join(home, ".hati")
+	skollDir := filepath.Join(home, ".skoll")
+	tyrDir := filepath.Join(home, ".tyr")
+
+	if db, err := fenrirdb.NewDB(filepath.Join(fenrirDir, "fenrir.db")); err == nil {
+		fenrirdb.InitSchema(db)
+		fmt.Printf("  ✅ fenrir.db initialized\n")
+	}
+
+	if db, err := hatidb.NewDB(filepath.Join(hatiDir, "hati.db")); err == nil {
+		hatidb.InitSchema(db)
+		fmt.Printf("  ✅ hati.db initialized\n")
+	}
+
+	if db, err := skolldb.NewDB(filepath.Join(skollDir, "skoll.db")); err == nil {
+		skolldb.InitSchema(db)
+		fmt.Printf("  ✅ skoll.db initialized\n")
+	}
+
+	if db, err := tyrdb.NewDB(filepath.Join(tyrDir, "tyr.db")); err == nil {
+		tyrdb.InitSchema(db)
+		fmt.Printf("  ✅ tyr.db initialized\n")
+	}
+}
+
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relPath, _ := filepath.Rel(src, path)
+		dstPath := filepath.Join(dst, relPath)
+		if info.IsDir() {
+			os.MkdirAll(dstPath, 0755)
+		} else {
+			osCopyFile(path, dstPath)
+		}
+		return nil
+	})
+}
+
+func osCopyFile(src, dst string) error {
+	srcFile, _ := os.Open(src)
+	defer srcFile.Close()
+	dstFile, _ := os.Create(dst)
+	defer dstFile.Close()
+	buf := make([]byte, 1024*1024)
+	for {
+		n, _ := srcFile.Read(buf)
+		if n == 0 {
+			break
+		}
+		dstFile.Write(buf[:n])
+	}
+	return nil
 }
 
 func contains(s, substr string) bool {
