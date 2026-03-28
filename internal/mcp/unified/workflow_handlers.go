@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/andragon31/Ragnarok/internal/fenrir/scanner"
@@ -973,4 +974,336 @@ func findAgentByType(agentType string, agents []map[string]string) string {
 		}
 	}
 	return ""
+}
+
+func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		ProjectPath  string   `json:"project_path"`
+		PRDFile      string   `json:"prd_file,omitempty"`
+		Title        string   `json:"title,omitempty"`
+		Requirements []string `json:"requirements,omitempty"`
+		AutoStart    bool     `json:"auto_start"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.ProjectPath == "" {
+		return nil, fmt.Errorf("project_path is required")
+	}
+
+	steps := []WorkflowStep{}
+	results := map[string]interface{}{}
+
+	step := func(name string, fn func() (interface{}, error)) {
+		out, err := fn()
+		status := "success"
+		if err != nil {
+			status = "error"
+			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
+		} else {
+			steps = append(steps, WorkflowStep{Name: name, Status: status, Output: out})
+		}
+		results[name] = out
+	}
+
+	fmt.Printf("🔄 Project Lifecycle: Starting full cycle\n")
+	fmt.Printf("   Project: %s\n", params.ProjectPath)
+	if params.PRDFile != "" {
+		fmt.Printf("   PRD: %s\n", params.PRDFile)
+	}
+	if len(params.Requirements) > 0 {
+		fmt.Printf("   Requirements: %d\n", len(params.Requirements))
+	}
+	fmt.Println()
+
+	step("Fenrir: Analyze Project", func() (interface{}, error) {
+		return s.callTool(ctx, "project_scan", map[string]interface{}{"path": params.ProjectPath})
+	})
+
+	scanResult := results["Fenrir: Analyze Project"]
+	analysis, _ := parseProjectAnalysis(scanResult)
+
+	var projectName string
+	if params.Title != "" {
+		projectName = params.Title
+	} else if analysis != nil {
+		projectName = analysis.Name
+	} else {
+		projectName = "Unnamed Project"
+	}
+
+	step("Fenrir: Store Project Context", func() (interface{}, error) {
+		stackInfo := "unknown"
+		archInfo := "unknown"
+		if analysis != nil {
+			stackInfo = fmt.Sprintf("%s with %s", analysis.Stack.Language, analysis.Stack.Framework)
+			archInfo = analysis.Architecture.Type
+		}
+		return s.callTool(ctx, "mem_save", map[string]interface{}{
+			"title": "Project: " + projectName,
+			"type":  "decision",
+			"what":  fmt.Sprintf("Project lifecycle started - Stack: %s, Architecture: %s", stackInfo, archInfo),
+			"where": params.ProjectPath,
+			"why":   "Initial project analysis and context setup",
+		})
+	})
+
+	var prdID string
+	if params.PRDFile != "" {
+		step("Fenrir: Parse PRD", func() (interface{}, error) {
+			return s.callTool(ctx, "prd_parse", map[string]interface{}{"file_path": params.PRDFile})
+		})
+
+		prdResult := results["Fenrir: Parse PRD"]
+		if prdMap, ok := prdResult.(map[string]interface{}); ok {
+			if id, ok := prdMap["prd_id"].(string); ok {
+				prdID = id
+			}
+		}
+
+		step("Fenrir: Store Requirements", func() (interface{}, error) {
+			var requirements []interface{}
+			if prdMap, ok := results["Fenrir: Parse PRD"].(map[string]interface{}); ok {
+				if reqs, ok := prdMap["requirements"].([]interface{}); ok {
+					requirements = reqs
+				}
+			}
+			for _, req := range requirements {
+				if reqText, ok := req.(string); ok {
+					s.callTool(ctx, "mem_save", map[string]interface{}{
+						"title": "PRD Requirement: " + reqText[:min(50, len(reqText))],
+						"type":  "requirement",
+						"what":  reqText,
+						"where": params.ProjectPath,
+					})
+				}
+			}
+			return map[string]interface{}{"requirements_stored": len(requirements)}, nil
+		})
+	}
+
+	for _, req := range params.Requirements {
+		step("Fenrir: Store Requirement: "+req[:min(30, len(req))], func() (interface{}, error) {
+			return s.callTool(ctx, "mem_save", map[string]interface{}{
+				"title": "Requirement: " + req[:min(50, len(req))],
+				"type":  "requirement",
+				"what":  req,
+				"where": params.ProjectPath,
+			})
+		})
+	}
+
+	planTitle := projectName + " Development Plan"
+	if params.Title != "" {
+		planTitle = params.Title
+	}
+
+	stackInfo := "auto"
+	archInfo := "auto"
+	if analysis != nil {
+		stackInfo = analysis.Stack.Language
+		archInfo = analysis.Architecture.Type
+	}
+	planDesc := fmt.Sprintf("Stack: %s, Architecture: %s", stackInfo, archInfo)
+
+	var planID string
+	step("Hati: Create Development Plan", func() (interface{}, error) {
+		return s.callTool(ctx, "plan_create", map[string]interface{}{
+			"title":       planTitle,
+			"description": planDesc,
+			"risk_level":  "medium",
+		})
+	})
+
+	planResult := results["Hati: Create Development Plan"]
+	if planMap, ok := planResult.(map[string]interface{}); ok {
+		if id, ok := planMap["id"].(string); ok {
+			planID = id
+		}
+	}
+
+	phaseTemplates := []scanner.PhaseTemplate{}
+	if analysis != nil {
+		phaseTemplates = scanner.GeneratePhasesAndTasks(analysis)
+	} else {
+		phaseTemplates = []scanner.PhaseTemplate{
+			{Name: "Setup", Tasks: []scanner.TaskTemplate{
+				{Title: "Initialize project", Description: "Initialize project", Priority: 5},
+				{Title: "Setup dependencies", Description: "Setup dependencies", Priority: 5},
+			}},
+			{Name: "Backend", Tasks: []scanner.TaskTemplate{
+				{Title: "Implement API endpoints", Description: "Implement API endpoints", Priority: 5},
+				{Title: "Setup database", Description: "Setup database", Priority: 5},
+			}},
+			{Name: "Features", Tasks: []scanner.TaskTemplate{
+				{Title: "Implement core features", Description: "Implement core features", Priority: 5},
+				{Title: "Add business logic", Description: "Add business logic", Priority: 5},
+			}},
+			{Name: "Testing", Tasks: []scanner.TaskTemplate{
+				{Title: "Write unit tests", Description: "Write unit tests", Priority: 5},
+				{Title: "Integration testing", Description: "Integration testing", Priority: 5},
+			}},
+			{Name: "Deployment", Tasks: []scanner.TaskTemplate{
+				{Title: "Setup CI/CD", Description: "Setup CI/CD", Priority: 5},
+				{Title: "Deploy to production", Description: "Deploy to production", Priority: 5},
+			}},
+		}
+	}
+
+	phaseIDs := []string{}
+	taskCount := 0
+	for i, template := range phaseTemplates {
+		phaseResult, err := s.callTool(ctx, "phase_create", map[string]interface{}{
+			"plan_id":   planID,
+			"title":     template.Name,
+			"order_num": i,
+		})
+		if err == nil {
+			if phaseMap, ok := phaseResult.(map[string]interface{}); ok {
+				if id, ok := phaseMap["id"].(string); ok {
+					phaseIDs = append(phaseIDs, id)
+				}
+			}
+		}
+
+		for _, task := range template.Tasks {
+			taskCount++
+			s.callTool(ctx, "task_create", map[string]interface{}{
+				"phase_id":    phaseIDs[len(phaseIDs)-1],
+				"title":       task.Title,
+				"description": task.Description,
+				"priority":    task.Priority,
+			})
+		}
+	}
+
+	step("Hati: Store Plan Context", func() (interface{}, error) {
+		return s.callTool(ctx, "mem_save", map[string]interface{}{
+			"title": "Plan Created: " + planTitle,
+			"type":  "decision",
+			"what":  fmt.Sprintf("Development plan created with %d phases and tasks", len(phaseTemplates)),
+			"where": planID,
+			"why":   "Initial planning complete, ready for development",
+		})
+	})
+
+	step("Skoll: List Available Agents", func() (interface{}, error) {
+		return s.callTool(ctx, "agent_list", map[string]interface{}{})
+	})
+
+	var availableAgents []map[string]string
+	if agentResult, ok := results["Skoll: List Available Agents"].(map[string]interface{}); ok {
+		if agents, ok := agentResult["agents"].([]interface{}); ok {
+			for _, a := range agents {
+				if agentMap, ok := a.(map[string]interface{}); ok {
+					availableAgents = append(availableAgents, map[string]string{
+						"name": agentMap["name"].(string),
+						"type": agentMap["type"].(string),
+					})
+				}
+			}
+		}
+	}
+
+	recommendedTypes := []string{"backend", "frontend", "qa", "devops"}
+	if analysis != nil {
+		if analysis.Architecture.HasFrontend {
+			recommendedTypes = []string{"backend", "frontend", "qa", "devops"}
+		} else {
+			recommendedTypes = []string{"backend", "qa", "devops"}
+		}
+	}
+
+	for _, agentType := range recommendedTypes {
+		agentName := findAgentByType(agentType, availableAgents)
+		if agentName != "" {
+			step(fmt.Sprintf("Skoll: Register Agent %s", agentType), func() (interface{}, error) {
+				return s.callTool(ctx, "agent_activate", map[string]interface{}{
+					"agent_id": agentName,
+				})
+			})
+		}
+	}
+
+	step("Tyr: Validate Project Dependencies", func() (interface{}, error) {
+		if analysis != nil && analysis.Stack.Language != "" {
+			return s.callTool(ctx, "pkg_check", map[string]interface{}{
+				"name":      analysis.Stack.Language,
+				"ecosystem": getEcosystem(analysis.Stack.Language),
+			})
+		}
+		return map[string]interface{}{"status": "skipped", "reason": "no stack detected"}, nil
+	})
+
+	step("Tyr: Run SAST Scan", func() (interface{}, error) {
+		return s.callTool(ctx, "sast_run", map[string]interface{}{
+			"path": params.ProjectPath,
+		})
+	})
+
+	step("Tyr: Validate Standards", func() (interface{}, error) {
+		return s.callTool(ctx, "standard_run_all", map[string]interface{}{})
+	})
+
+	reviewQuestion := fmt.Sprintf("¿Apruebas este plan de desarrollo? (Stack: %s, %d fases)", stackInfo, len(phaseTemplates))
+
+	step("Hati: Create Human Review", func() (interface{}, error) {
+		return s.callTool(ctx, "human_review_create", map[string]interface{}{
+			"review_type": "prd_approval",
+			"entity_type": "plan",
+			"entity_id":   planID,
+			"question":    reviewQuestion,
+		})
+	})
+
+	response := map[string]interface{}{
+		"workflow":       "project_lifecycle",
+		"status":         "completed",
+		"project_name":   projectName,
+		"project_path":   params.ProjectPath,
+		"plan_id":        planID,
+		"prd_id":         prdID,
+		"phases":         len(phaseTemplates),
+		"agents":         len(availableAgents),
+		"stack_detected": analysis != nil,
+		"steps":          steps,
+		"auto_start":     params.AutoStart,
+		"message":        "Project lifecycle complete. Plan created and validated. Human review required.",
+	}
+
+	if params.AutoStart {
+		response["next_step"] = "rag continue --plan " + planID
+	} else {
+		response["next_step"] = "rag continue --plan " + planID + "  # After human approval"
+	}
+
+	return &Response{Result: response}, nil
+}
+
+func getEcosystem(language string) string {
+	switch strings.ToLower(language) {
+	case "go":
+		return "go"
+	case "javascript", "typescript", "node":
+		return "npm"
+	case "python":
+		return "pypi"
+	case "rust":
+		return "cargo"
+	case "java":
+		return "maven"
+	case "dotnet", "csharp":
+		return "nuget"
+	default:
+		return "npm"
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -187,6 +187,11 @@ func (s *Server) registerWorkflowHandlers() {
 			schema: `{"type":"object","properties":{"verbose":{"type":"boolean","description":"Show detailed diagnostics"}}}`,
 			fn:     s.handleEcosystemDiagnose,
 		},
+		"workflow_project_lifecycle": {
+			desc:   "Execute full project lifecycle: analyze, plan, assign agents, validate (Recommended for agents)",
+			schema: `{"type":"object","properties":{"project_path":{"type":"string","description":"Project directory path"},"prd_file":{"type":"string","description":"PRD file path (optional)"},"title":{"type":"string","description":"Project title (optional)"},"requirements":{"type":"array","items":{"type":"string"},"description":"Requirements array (optional)"},"auto_start":{"type":"boolean","description":"Auto-start development after planning"}},"required":["project_path"]}`,
+			fn:     s.handleWorkflowProjectLifecycle,
+		},
 	}
 
 	for name, w := range workflows {
