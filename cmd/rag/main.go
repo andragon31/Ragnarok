@@ -102,6 +102,21 @@ func main() {
 	statusCmd := flag.NewFlagSet("status", flag.ExitOnError)
 	statusPlan := statusCmd.String("plan", "", "Plan ID (default: active)")
 
+	projectCmd := flag.NewFlagSet("project", flag.ExitOnError)
+	projectPath := projectCmd.String("path", "", "Project directory (required)")
+	projectPRD := projectCmd.String("prd", "", "PRD file path (optional, for new projects)")
+	projectTitle := projectCmd.String("title", "", "Project title (optional)")
+	projectStack := projectCmd.String("stack", "", "Tech stack (auto-detect if not specified)")
+
+	requirementCmd := flag.NewFlagSet("requirement", flag.ExitOnError)
+	requirementProject := requirementCmd.String("project", "", "Project directory (required)")
+	requirementText := requirementCmd.String("text", "", "Requirement text (required)")
+	requirementPriority := requirementCmd.Int("priority", 5, "Priority (1-10)")
+
+	planCmd := flag.NewFlagSet("plan", flag.ExitOnError)
+	planProject := planCmd.String("project", "", "Project directory (required)")
+	planTitle := planCmd.String("title", "", "Plan title (optional)")
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
@@ -162,6 +177,15 @@ func main() {
 	case "status":
 		statusCmd.Parse(os.Args[2:])
 		runStatus(*statusPlan)
+	case "project":
+		projectCmd.Parse(os.Args[2:])
+		runProject(*projectPath, *projectPRD, *projectTitle, *projectStack)
+	case "requirement":
+		requirementCmd.Parse(os.Args[2:])
+		runRequirement(*requirementProject, *requirementText, *requirementPriority)
+	case "plan":
+		planCmd.Parse(os.Args[2:])
+		runPlan(*planProject, *planTitle)
 	case "version":
 		fmt.Printf("Ragnarok v%s\n", version)
 		fmt.Println("AI Governance & Memory Layer Ecosystem")
@@ -529,7 +553,8 @@ func printUsage() {
 	fmt.Println(`Ragnarok v2.1.0 - AI Governance & Memory Layer
 
 Usage:
-  rag new --project NAME [--path DIR]     Create new project (Recommended)
+  rag project --path DIR [--prd FILE]      Analyze or init project (Recommended)
+  rag new --project NAME [--path DIR]     Create new project from stack
   rag continue --plan ID                  Resume existing project
   rag feature --name NAME [--plan ID]    Start new feature
   rag review [--plan ID]                  Quality checkpoint review
@@ -543,12 +568,18 @@ Usage:
   rag setup --agent AGENT                Setup MCP for agent (opencode, cursor, windsurf)
   rag version                            Show version
 
-Simplified Workflows (Recommended):
-  rag new --project myapi --path ./myapi --stack=go
-  rag continue --plan <plan_id>
-  rag feature --name user-auth --plan <plan_id>
-  rag review --plan <plan_id>
-  rag status
+Project Workflows:
+  rag project --path ./myapi --prd ./PRD.md  # Init project from PRD
+  rag project --path ./existing              # Analyze existing project
+  rag requirement add --project ./myapi --text "requirement"
+  rag plan create --project ./myapi [--title "Plan Title"]
+
+Execution:
+  rag new --project NAME [--stack]     Create new project from stack
+  rag continue --plan ID                Resume existing project
+  rag feature --name NAME [--plan ID]  Start new feature
+  rag review [--plan ID]               Quality checkpoint review
+  rag status [--plan ID]               Show project status
 
 Quick Setup:
   rag setup opencode     Configure OpenCode (most common)
@@ -1076,6 +1107,265 @@ func runStatus(planID string) {
 	}
 
 	fmt.Println("\n✓ Status check complete")
+}
+
+func runProject(projectPath, prdFile, title, stack string) {
+	if projectPath == "" {
+		fmt.Println("Error: --path is required")
+		fmt.Println("Example: rag project --path ./mi-proyecto --prd ./PRD.md")
+		os.Exit(1)
+	}
+
+	absPath, _ := filepath.Abs(projectPath)
+
+	srv, err := unified.NewServer("")
+	if err != nil {
+		fmt.Printf("Error initializing unified server: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+
+	if prdFile != "" {
+		fmt.Printf("Ragnarok Project - Initializing from PRD\n")
+		fmt.Printf("Project: %s\n", absPath)
+		fmt.Printf("PRD: %s\n", prdFile)
+		fmt.Println(strings.Repeat("─", 50))
+
+		result, err := srv.ExecuteWorkflow(ctx, "workflow_prd_analyze", map[string]interface{}{
+			"prd_file":     prdFile,
+			"project_path": absPath,
+			"plan_title":   title,
+		})
+
+		if err != nil {
+			fmt.Printf("Error analyzing PRD: %v\n", err)
+			os.Exit(1)
+		}
+
+		planID := getPlanID(result)
+		if planID == "" {
+			planID = getStringResult(result, "id")
+		}
+
+		fmt.Println("\n✓ PRD analyzed and plan created!")
+		fmt.Printf("Plan ID: %s\n", planID)
+		fmt.Println("\n📋 Next steps:")
+		fmt.Println("  rag project --path " + absPath + "  # Continue with this project")
+		fmt.Printf("  rag continue --plan %s  # Start development\n", planID)
+	} else {
+		fmt.Printf("Ragnarok Project - Existing project\n")
+		fmt.Printf("Project: %s\n", absPath)
+		fmt.Println(strings.Repeat("─", 50))
+
+		fmt.Println("\n🔍 Analyzing existing project...")
+
+		result, err := srv.ExecuteWorkflow(ctx, "project_scan", map[string]interface{}{
+			"path": absPath,
+		})
+
+		if err != nil {
+			fmt.Printf("Error scanning project: %v\n", err)
+			os.Exit(1)
+		}
+
+		projectName := title
+		if projectName == "" {
+			projectName = getStringResult(result, "name")
+			if projectName == "" {
+				projectName = filepath.Base(absPath)
+			}
+		}
+
+		detectedStack := getStringResult(result, "stack")
+		architecture := getStringResult(result, "architecture")
+
+		memResult, _ := srv.ExecuteWorkflow(ctx, "mem_save", map[string]interface{}{
+			"title": "Project: " + projectName,
+			"type":  "decision",
+			"what":  "Project analyzed: " + absPath,
+			"why":   "To understand existing codebase before making changes",
+			"where": absPath,
+		})
+		_ = memResult
+
+		fmt.Println("\n✓ Project analyzed!")
+		fmt.Printf("  Name: %s\n", projectName)
+		fmt.Printf("  Stack: %s\n", detectedStack)
+		fmt.Printf("  Architecture: %s\n", architecture)
+		fmt.Println("\n📋 Options:")
+		fmt.Println("  rag requirement add --project " + absPath + "  # Add requirements")
+		fmt.Println("  rag plan create --project " + absPath + "  # Create plan from requirements")
+		fmt.Println("  rag continue --plan <plan_id>  # Resume development")
+	}
+}
+
+func runRequirement(projectPath, text string, priority int) {
+	if projectPath == "" || text == "" {
+		fmt.Println("Error: --project and --text are required")
+		fmt.Println("Example: rag requirement add --project ./mi-proyecto --text \"Necesito auth con JWT\"")
+		os.Exit(1)
+	}
+
+	absPath, _ := filepath.Abs(projectPath)
+
+	fmt.Printf("Ragnarok Requirement - Adding requirement\n")
+	fmt.Printf("Project: %s\n", absPath)
+	fmt.Printf("Requirement: %s\n", text)
+	fmt.Println(strings.Repeat("─", 50))
+
+	srv, err := unified.NewServer("")
+	if err != nil {
+		fmt.Printf("Error initializing unified server: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+
+	memResult, err := srv.ExecuteWorkflow(ctx, "mem_save", map[string]interface{}{
+		"title": "Requirement: " + text,
+		"type":  "requirement",
+		"what":  text,
+		"where": absPath,
+	})
+
+	if err != nil {
+		fmt.Printf("Error saving requirement: %v\n", err)
+		os.Exit(1)
+	}
+
+	memID := getStringResult(memResult, "id")
+
+	fmt.Println("\n✓ Requirement added!")
+	fmt.Printf("Memory ID: %s\n", memID)
+	fmt.Println("\n📋 Next steps:")
+	fmt.Println("  rag requirement add --project " + absPath + " --text \"Another requirement\"")
+	fmt.Println("  rag plan create --project " + absPath + "  # Create plan from all requirements")
+}
+
+func runPlan(projectPath, title string) {
+	if projectPath == "" {
+		fmt.Println("Error: --project is required")
+		fmt.Println("Example: rag plan create --project ./mi-proyecto --title \"Mi Plan\"")
+		os.Exit(1)
+	}
+
+	absPath, _ := filepath.Abs(projectPath)
+
+	fmt.Printf("Ragnarok Plan - Creating plan from project\n")
+	fmt.Printf("Project: %s\n", absPath)
+	fmt.Println(strings.Repeat("─", 50))
+
+	srv, err := unified.NewServer("")
+	if err != nil {
+		fmt.Printf("Error initializing unified server: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+
+	fmt.Println("\n🔍 Scanning project...")
+	scanResult, err := srv.ExecuteWorkflow(ctx, "project_scan", map[string]interface{}{
+		"path": absPath,
+	})
+
+	if err != nil {
+		fmt.Printf("Error scanning project: %v\n", err)
+		os.Exit(1)
+	}
+
+	projectName := title
+	if projectName == "" {
+		projectName = getStringResult(scanResult, "name")
+		if projectName == "" {
+			projectName = filepath.Base(absPath)
+		}
+	}
+
+	detectedStack := getStringResult(scanResult, "stack")
+
+	fmt.Printf("\n📋 Creating plan for: %s\n", projectName)
+	fmt.Printf("   Stack detected: %s\n", detectedStack)
+
+	memContext, _ := srv.ExecuteWorkflow(ctx, "mem_context", map[string]interface{}{
+		"module": absPath,
+	})
+
+	memRequirements, _ := srv.ExecuteWorkflow(ctx, "mem_find", map[string]interface{}{
+		"query": "requirement " + projectName,
+		"limit": 50,
+	})
+
+	_ = memContext
+
+	requirementsText := ""
+	if reqMap, ok := memRequirements.(map[string]interface{}); ok {
+		if results, ok := reqMap["results"].([]interface{}); ok {
+			for _, r := range results {
+				if req, ok := r.(map[string]interface{}); ok {
+					if what, ok := req["what"].(string); ok {
+						requirementsText += "- " + what + "\n"
+					}
+				}
+			}
+		}
+	}
+
+	fmt.Println("\n📝 Requirements found:")
+	if requirementsText != "" {
+		fmt.Println(requirementsText)
+	} else {
+		fmt.Println("  (none - will use stack-based phases)")
+	}
+
+	planResult, err := srv.ExecuteWorkflow(ctx, "plan_create", map[string]interface{}{
+		"title":       projectName + " Plan",
+		"description": requirementsText,
+		"risk_level":  "medium",
+	})
+
+	if err != nil {
+		fmt.Printf("Error creating plan: %v\n", err)
+		os.Exit(1)
+	}
+
+	planID := getStringResult(planResult, "id")
+	if planID == "" {
+		planID = getStringResult(planResult, "plan_id")
+	}
+
+	phases := getDefaultPhases(detectedStack)
+	fmt.Printf("\n📋 Creating %d phases based on stack...\n", len(phases))
+
+	for i, phaseName := range phases {
+		srv.ExecuteWorkflow(ctx, "phase_create", map[string]interface{}{
+			"plan_id":   planID,
+			"title":     phaseName,
+			"order_num": i,
+		})
+	}
+
+	memSave, _ := srv.ExecuteWorkflow(ctx, "mem_save", map[string]interface{}{
+		"title": "Plan created: " + projectName,
+		"type":  "decision",
+		"what":  "Development plan created with " + fmt.Sprintf("%d", len(phases)) + " phases",
+		"where": planID,
+	})
+	_ = memSave
+
+	fmt.Println("\n✓ Plan created!")
+	fmt.Printf("Plan ID: %s\n", planID)
+	fmt.Println("\n📋 Next steps:")
+	fmt.Printf("  rag continue --plan %s  # Start development\n", planID)
+}
+
+func getStringResult(result interface{}, key string) string {
+	if m, ok := result.(map[string]interface{}); ok {
+		if v, ok := m[key].(string); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func getDefaultPhases(stack string) []string {

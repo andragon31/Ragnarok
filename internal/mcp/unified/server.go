@@ -148,7 +148,7 @@ func (s *Server) registerWorkflowHandlers() {
 			fn:     s.handleWorkflowProjectBootstrap,
 		},
 		"workflow_prd_analyze": {
-			desc:   "Analyze PRD and create development plan [DEPRECATED: Use workflow_stack_based_init]",
+			desc:   "Analyze PRD and create full development plan with stack detection",
 			schema: `{"type":"object","properties":{"prd_file":{"type":"string"},"project_path":{"type":"string"},"plan_title":{"type":"string"}},"required":["prd_file"]}`,
 			fn:     s.handleWorkflowPRDAnalyze,
 		},
