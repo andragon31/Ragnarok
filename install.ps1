@@ -2,8 +2,8 @@
 # AI Governance & Memory Layer Ecosystem
 # Usage: 
 #   irm https://raw.githubusercontent.com/andragon31/Ragnarok/vX.X.X/install.ps1 | iex
-#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v2.2.3/install.ps1 | iex
-#   Or: powershell -File install.ps1 -Version 2.2.3
+#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v2.2.4/install.ps1 | iex
+#   Or: powershell -File install.ps1 -Version 2.2.4
 
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok",
@@ -11,7 +11,7 @@ param(
 )
 
 if ($Version -eq "") {
-    $VERSION = "2.2.3"
+    $VERSION = "2.2.4"
 } else {
     $VERSION = $Version
 }
