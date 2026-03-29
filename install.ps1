@@ -83,7 +83,8 @@ try {
 Write-Step "2. Verifying checksum"
 
 $checksums = (Invoke-RestMethod -Uri $CHECKSUM_URL -UseBasicParsing).Content
-$match = $checksums -match "^\s*([a-fA-F0-9]+)\s+${ASSET}\s*$"
+$assetEscaped = [regex]::Escape($ASSET)
+$match = $checksums -match "^\s*([a-fA-F0-9]+)\s+${assetEscaped}\s*$"
 if (-not $match) {
     Remove-Item $zipPath -ErrorAction SilentlyContinue
     Write-Err "Could not find checksum for $ASSET in checksums.txt"
