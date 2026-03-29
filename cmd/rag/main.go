@@ -24,7 +24,7 @@ import (
 	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
-var version = "2.2.3"
+var version = "2.2.4"
 
 type Plugin struct {
 	Name    string
@@ -622,7 +622,7 @@ func runIntegrate(projectPath string) {
 }
 
 func printUsage() {
-	fmt.Println(`Ragnarok v2.2.3 - AI Governance & Memory Layer
+	fmt.Println(`Ragnarok v2.2.4 - AI Governance & Memory Layer
 
 Usage:
   rag project --path DIR [--prd FILE]      Analyze or init project (Recommended)
