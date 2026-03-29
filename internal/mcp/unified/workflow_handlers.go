@@ -156,17 +156,6 @@ func (s *Server) handleWorkflowPRDAnalyze(ctx context.Context, req *Request) (*R
 		}
 	}
 
-	if analysis != nil {
-		phaseTemplates := scanner.GeneratePhasesAndTasks(analysis)
-		for i, template := range phaseTemplates {
-			s.callTool(ctx, "phase_create", map[string]interface{}{
-				"plan_id":   planID,
-				"title":     template.Name,
-				"order_num": i,
-			})
-		}
-	}
-
 	step("human_review_create", func() (interface{}, error) {
 		return s.callTool(ctx, "human_review_create", map[string]interface{}{
 			"review_type": "prd_approval",
@@ -248,13 +237,13 @@ func (s *Server) handleWorkflowTeamSetupFromPRD(ctx context.Context, req *Reques
 	for _, rec := range recommendations {
 		recName := rec["name"]
 		recType := rec["type"]
-		
+
 		agentResult, err := s.callTool(ctx, "agent_create", map[string]interface{}{
 			"name":       recName,
 			"agent_type": recType,
 			"skills":     []string{rec["role"]},
 		})
-		
+
 		if err != nil {
 			steps = append(steps, WorkflowStep{Name: "agent_create:" + recName, Status: "error", Error: err.Error()})
 			continue
@@ -295,7 +284,6 @@ func (s *Server) handleWorkflowTeamSetupFromPRD(ctx context.Context, req *Reques
 		"message":  fmt.Sprintf("Team '%s' created with %d agents based on PRD analysis.", params.TeamName, len(agentIDs)),
 	}}, nil
 }
-
 
 func (s *Server) handleWorkflowAgenticInit(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
@@ -1155,7 +1143,7 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 	steps := []WorkflowStep{}
 	results := map[string]interface{}{}
 	startTime := time.Now()
-	
+
 	// Helper to check if we are approaching IDE timeout (safe margin: 40s)
 	shouldBreak := func() bool {
 		return time.Since(startTime) > 40*time.Second
@@ -1204,7 +1192,7 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 			"query": params.PRDFile,
 			"type":  "prd_id",
 		})
-		
+
 		if prdMap, ok := existingPRDs.(map[string]interface{}); ok {
 			if matches, ok := prdMap["matches"].([]interface{}); ok && len(matches) > 0 {
 				if first, ok := matches[0].(map[string]interface{}); ok {
@@ -1224,7 +1212,7 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 			if prdMap, ok := prdResult.(map[string]interface{}); ok {
 				if id, ok := prdMap["prd_id"].(string); ok {
 					prdID = id
-					
+
 					// Optimization: save all requirements in a single batch to avoid IDE timeouts
 					if reqs, ok := prdMap["requirements"].([]interface{}); ok && len(reqs) > 0 {
 						reqsJSON, _ := json.Marshal(reqs)
@@ -1235,8 +1223,8 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 						})
 						// Also save the PRD ID for future resumes
 						s.callTool(ctx, "mem_save", map[string]interface{}{
-							"content": id,
-							"type":    "prd_id",
+							"content":  id,
+							"type":     "prd_id",
 							"metadata": map[string]string{"file": params.PRDFile},
 						})
 					}
@@ -1277,18 +1265,18 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 					analysis = &scanner.ProjectAnalysis{Architecture: &scanner.ArchitectureInfo{}, Stack: &scanner.StackInfo{}}
 				}
 				recommendations := scanner.GetRecommendedAgents(analysis)
-				
+
 				createdIDs := []string{}
 				for _, rec := range recommendations {
 					recName := rec["name"]
 					recType := rec["type"]
-					
+
 					agentResult, err := s.callTool(ctx, "agent_create", map[string]interface{}{
 						"name":       recName,
 						"agent_type": recType,
 						"skills":     []string{rec["role"]},
 					})
-					
+
 					if err == nil {
 						if agentMap, ok := agentResult.(map[string]interface{}); ok {
 							if id, ok := agentMap["agent_id"].(string); ok {
@@ -1319,38 +1307,54 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 		})
 	}
 
-	// 5. Hati: Planning and Assignment (Check if plan exists)
+	// 5. Hati: Planning and Assignment
 	var planID string
 	if !shouldBreak() {
-		existingPlans, _ := s.callTool(ctx, "plan_list", map[string]interface{}{"status": "all"})
-		if pMap, ok := existingPlans.(map[string]interface{}); ok {
-			if plans, ok := pMap["plans"].([]interface{}); ok {
-				for _, p := range plans {
-					if pm, ok := p.(map[string]interface{}); ok {
-						if pm["title"] == projectName+" Execution Plan" {
-							planID, _ = pm["id"].(string)
-							log.Printf("   Plan already exists: %s", planID)
-							steps = append(steps, WorkflowStep{Name: "Hati: Generate Development Plan", Status: "success", Output: "Resumed from existing plan"})
-							break
-						}
-					}
-				}
-			}
-		}
-
-		if planID == "" {
+		if prdID != "" {
 			step("Hati: Generate Development Plan", func() (interface{}, error) {
 				stackInfo, archInfo := getStackInfoSafe(analysis)
-				return s.callTool(ctx, "plan_create", map[string]interface{}{
+				return s.callTool(ctx, "plan_create_from_prd", map[string]interface{}{
+					"prd_id":      prdID,
 					"title":       projectName + " Execution Plan",
 					"description": fmt.Sprintf("Auto-generated plan based on PRD and project scan (Stack: %s, Arch: %s)", stackInfo, archInfo),
 				})
 			})
-
 			planResult := results["Hati: Generate Development Plan"]
 			if planMap, ok := planResult.(map[string]interface{}); ok {
 				if id, ok := planMap["id"].(string); ok {
 					planID = id
+				}
+			}
+		} else {
+			existingPlans, _ := s.callTool(ctx, "plan_list", map[string]interface{}{"status": "all"})
+			if pMap, ok := existingPlans.(map[string]interface{}); ok {
+				if plans, ok := pMap["plans"].([]interface{}); ok {
+					for _, p := range plans {
+						if pm, ok := p.(map[string]interface{}); ok {
+							if pm["title"] == projectName+" Execution Plan" {
+								planID, _ = pm["id"].(string)
+								log.Printf("   Plan already exists: %s", planID)
+								steps = append(steps, WorkflowStep{Name: "Hati: Generate Development Plan", Status: "success", Output: "Resumed from existing plan"})
+								break
+							}
+						}
+					}
+				}
+			}
+
+			if planID == "" {
+				step("Hati: Generate Development Plan", func() (interface{}, error) {
+					stackInfo, archInfo := getStackInfoSafe(analysis)
+					return s.callTool(ctx, "plan_create", map[string]interface{}{
+						"title":       projectName + " Execution Plan",
+						"description": fmt.Sprintf("Auto-generated plan based on project scan (Stack: %s, Arch: %s)", stackInfo, archInfo),
+					})
+				})
+				planResult := results["Hati: Generate Development Plan"]
+				if planMap, ok := planResult.(map[string]interface{}); ok {
+					if id, ok := planMap["id"].(string); ok {
+						planID = id
+					}
 				}
 			}
 		}
@@ -1374,13 +1378,15 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 		if !hasData {
 			phaseTemplates := scanner.GeneratePhasesAndTasks(analysis)
 			for i, phaseTpl := range phaseTemplates {
-				if shouldBreak() { break }
+				if shouldBreak() {
+					break
+				}
 				phaseResult, pErr := s.callTool(ctx, "phase_create", map[string]interface{}{
 					"plan_id":   planID,
 					"title":     phaseTpl.Name,
 					"order_num": i,
 				})
-				
+
 				if pErr == nil {
 					if phaseMap, ok := phaseResult.(map[string]interface{}); ok {
 						if phaseID, ok := phaseMap["id"].(string); ok {
@@ -1443,18 +1449,18 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 	}
 
 	response := map[string]interface{}{
-		"workflow":        "project_lifecycle",
-		"status":          status,
-		"project_name":    projectName,
-		"plan_id":         planID,
-		"prd_id":          prdID,
-		"agent_count":     len(agentIDs),
-		"task_count":      taskCount,
-		"assignments":     assignmentCount,
-		"steps":           steps,
-		"auto_start":      params.AutoStart,
-		"message":         msg,
-		"elapsed_time":    time.Since(startTime).String(),
+		"workflow":     "project_lifecycle",
+		"status":       status,
+		"project_name": projectName,
+		"plan_id":      planID,
+		"prd_id":       prdID,
+		"agent_count":  len(agentIDs),
+		"task_count":   taskCount,
+		"assignments":  assignmentCount,
+		"steps":        steps,
+		"auto_start":   params.AutoStart,
+		"message":      msg,
+		"elapsed_time": time.Since(startTime).String(),
 	}
 
 	if params.AutoStart && planID != "" && status == "completed" {

@@ -846,9 +846,18 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 		return nil, fmt.Errorf("error iterating requirements: %w", err)
 	}
 
-	defaultPhases := []string{"Setup", "Backend", "Frontend", "Testing", "Deploy"}
-	if len(params.Phases) > 0 {
-		defaultPhases = params.Phases
+	type taskInfo struct {
+		PhaseIndex int
+		Title      string
+		Type       string
+	}
+
+	phaseNames := params.Phases
+	if len(phaseNames) == 0 {
+		phaseNames = s.extractPhasesFromPRD(params.PRDID)
+		if len(phaseNames) == 0 {
+			phaseNames = []string{"Setup", "Backend", "Frontend", "Testing", "Deploy"}
+		}
 	}
 
 	planID := generateID("plan")
@@ -866,25 +875,36 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 		return nil, fmt.Errorf("failed to create plan: %w", err)
 	}
 
-	type taskInfo struct {
-		PhaseIndex int
-		Title      string
-		Type       string
-	}
 	tasksToCreate := []taskInfo{}
 
-	for i, phase := range defaultPhases {
+	phaseMap := map[string]int{}
+	for i, phase := range phaseNames {
 		phaseID := generateID("phase")
 		phaseQuery := `INSERT INTO phases (id, plan_id, name, order_num, status, created_at, updated_at)
 					   VALUES (?, ?, ?, ?, 'pending', ?, ?)`
 		if _, err := s.db.Exec(phaseQuery, phaseID, planID, phase, i, now, now); err != nil {
 			return nil, fmt.Errorf("failed to create phase: %w", err)
 		}
+		phaseMap[phase] = i
+	}
 
-		for _, req := range requirements {
+	phaseIdx := 0
+	for _, req := range requirements {
+		phaseIdx = (phaseIdx + 1) % len(phaseNames)
+		taskTitle := fmt.Sprintf("[%s] %s", strings.ToUpper(req.Type), req.Title)
+		tasksToCreate = append(tasksToCreate, taskInfo{
+			PhaseIndex: phaseIdx,
+			Title:      taskTitle,
+			Type:       req.Type,
+		})
+	}
+
+	if len(tasksToCreate) == 0 && len(requirements) > 0 {
+		for i, req := range requirements {
+			phaseIdx := i % len(phaseNames)
 			taskTitle := fmt.Sprintf("[%s] %s", strings.ToUpper(req.Type), req.Title)
 			tasksToCreate = append(tasksToCreate, taskInfo{
-				PhaseIndex: i,
+				PhaseIndex: phaseIdx,
 				Title:      taskTitle,
 				Type:       req.Type,
 			})
@@ -913,7 +933,7 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 		"plan_id":             planID,
 		"title":               planTitle,
 		"prd_id":              params.PRDID,
-		"phases_created":      len(defaultPhases),
+		"phases_created":      len(phaseNames),
 		"tasks_created":       len(taskIDs),
 		"requirements_linked": len(requirements),
 		"status":              "draft",
@@ -969,23 +989,81 @@ func extractPRDVersion(content string) string {
 	return "1.0"
 }
 
+func (s *Server) extractPhasesFromPRD(prdID string) []string {
+	var content string
+	contentQuery := `SELECT content FROM prds WHERE id = ?`
+	row := s.db.QueryRow(contentQuery, prdID)
+	if err := row.Scan(&content); err != nil {
+		return nil
+	}
+
+	skipSections := map[string]bool{
+		"tabla de contenidos":  true,
+		"control de versiones": true,
+		"glosario":             true,
+		"resumen":              true,
+		"anexos":               true,
+		"appendix":             true,
+	}
+
+	re := regexp.MustCompile(`(?m)^##?\s*\d+\.?\s*([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ\s–-]+?)(?:\n|—|-|\s*$)`)
+	matches := re.FindAllStringSubmatch(content, -1)
+
+	var phases []string
+	seen := make(map[string]bool)
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		title := strings.TrimSpace(match[1])
+		title = strings.ReplaceAll(title, "–", "-")
+		title = strings.ReplaceAll(title, "  ", " ")
+		title = strings.Trim(title, " ")
+
+		lower := strings.ToLower(title)
+		if skipSections[lower] || title == "" || len(title) < 4 {
+			continue
+		}
+		if seen[title] {
+			continue
+		}
+		seen[title] = true
+		phases = append(phases, title)
+		if len(phases) >= 12 {
+			break
+		}
+	}
+
+	if len(phases) < 3 {
+		return nil
+	}
+	return phases
+}
+
 func (s *Server) extractRequirements(content string, prdID string) ([]map[string]string, error) {
 	requirements := []map[string]string{}
 
-	re := regexp.MustCompile(`(?m)^[-*]\s+\[?\s*([A-Z]+-?\d*)\s*\]?\s*[:.-]?\s*(.+)`)
-	matches := re.FindAllStringSubmatch(content, -1)
+	reStructured := regexp.MustCompile(`(?m)^[-*]\s+(?:\[([A-Z]+-?\d*)\]\s*[:.-]?\s*)?(.+)`)
+	matchesStructured := reStructured.FindAllStringSubmatch(content, -1)
 
-	for i, match := range matches {
+	for i, match := range matchesStructured {
 		reqID := fmt.Sprintf("REQ-%03d", i+1)
 		if len(match) > 1 && match[1] != "" {
 			reqID = match[1]
 		}
-		title := match[len(match)-1]
+		title := strings.TrimSpace(match[len(match)-1])
+		if title == "" {
+			continue
+		}
 
 		reqType := "functional"
-		if strings.Contains(strings.ToLower(title), "performance") ||
-			strings.Contains(strings.ToLower(title), "security") ||
-			strings.Contains(strings.ToLower(title), "scalability") {
+		lowerTitle := strings.ToLower(title)
+		if strings.Contains(lowerTitle, "performance") ||
+			strings.Contains(lowerTitle, "security") ||
+			strings.Contains(lowerTitle, "scalability") ||
+			strings.Contains(lowerTitle, "compliance") ||
+			strings.Contains(lowerTitle, "rate limit") ||
+			strings.Contains(lowerTitle, "owasp") {
 			reqType = "non-functional"
 		}
 
@@ -999,6 +1077,60 @@ func (s *Server) extractRequirements(content string, prdID string) ([]map[string
 		_, err := s.db.Exec(reqQuery, generateID("req"), prdID, reqType, title)
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert requirement: %w", err)
+		}
+	}
+
+	if len(requirements) == 0 {
+		reSection := regexp.MustCompile(`(?m)^##?\s*\d+\.?\s*([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ\s]+?)(?:\n|—|-|$)`)
+		sectionMatches := reSection.FindAllStringSubmatch(content, -1)
+		seenTitles := make(map[string]bool)
+
+		for i, match := range sectionMatches {
+			if len(match) < 2 {
+				continue
+			}
+			title := strings.TrimSpace(match[1])
+			title = strings.ReplaceAll(title, "–", "-")
+			title = strings.Trim(title, " ")
+
+			skipWords := []string{"Tabla de Contenidos", "Control de Versiones", "Glosario", "Resumen", "Anexos", "Appendix"}
+			skip := false
+			for _, w := range skipWords {
+				if strings.Contains(strings.ToLower(title), strings.ToLower(w)) {
+					skip = true
+					break
+				}
+			}
+			if skip || title == "" || len(title) < 3 {
+				continue
+			}
+			if seenTitles[title] {
+				continue
+			}
+			seenTitles[title] = true
+
+			reqType := "functional"
+			lowerTitle := strings.ToLower(title)
+			if strings.Contains(lowerTitle, "seguridad") ||
+				strings.Contains(lowerTitle, "arquitectura") ||
+				strings.Contains(lowerTitle, "stack") ||
+				strings.Contains(lowerTitle, "infraestructura") ||
+				strings.Contains(lowerTitle, "operaciones") {
+				reqType = "non-functional"
+			}
+
+			reqID := fmt.Sprintf("SEC-%03d", i+1)
+			requirements = append(requirements, map[string]string{
+				"id":    reqID,
+				"type":  reqType,
+				"title": title,
+			})
+
+			reqQuery := `INSERT INTO prd_requirements (id, prd_id, req_type, priority, title, status) VALUES (?, ?, ?, 'medium', ?, 'pending')`
+			_, err := s.db.Exec(reqQuery, generateID("req"), prdID, reqType, title)
+			if err != nil {
+				return nil, fmt.Errorf("failed to insert requirement: %w", err)
+			}
 		}
 	}
 
