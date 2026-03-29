@@ -523,16 +523,17 @@ func printUnifiedStats(stats *EcosystemStats) {
 }
 
 func runBackup(plugin string, backupDir string) {
+	home, _ := os.UserHomeDir()
+	ragnarokDir := filepath.Join(home, ".ragnarok")
 	plugins := map[string]string{
-		"fenrir": "~/.fenrir",
-		"hati":   "~/.hati",
-		"skoll":  "~/.skoll",
-		"tyr":    "~/.tyr",
+		"fenrir": filepath.Join(ragnarokDir, ".fenrir"),
+		"hati":   filepath.Join(ragnarokDir, ".hati"),
+		"skoll":  filepath.Join(ragnarokDir, ".skoll"),
+		"tyr":    filepath.Join(ragnarokDir, ".tyr"),
 	}
 
 	if backupDir == "" {
-		home, _ := os.UserHomeDir()
-		backupDir = home + "/OneDrive/RagnarokBackups"
+		backupDir = filepath.Join(home, "OneDrive", "RagnarokBackups")
 	}
 
 	os.MkdirAll(backupDir, 0755)
@@ -568,7 +569,7 @@ func backupPlugin(name string, sourceDir string, backupDir string) {
 	}
 
 	timestamp := time.Now().Format("2006-01-02")
-	backupFile := backupDir + "/" + name + "_" + timestamp + ".zip"
+	backupFile := filepath.Join(backupDir, name+"_"+timestamp+".zip")
 
 	// Simple copy for now - in production would use archive/zip
 	fmt.Printf("  Would backup to: %s\n", backupFile)
@@ -582,11 +583,13 @@ func runRestore(plugin string, backupFile string) {
 		os.Exit(1)
 	}
 
+	home, _ := os.UserHomeDir()
+	ragnarokDir := filepath.Join(home, ".ragnarok")
 	plugins := map[string]string{
-		"fenrir": "~/.fenrir",
-		"hati":   "~/.hati",
-		"skoll":  "~/.skoll",
-		"tyr":    "~/.tyr",
+		"fenrir": filepath.Join(ragnarokDir, ".fenrir"),
+		"hati":   filepath.Join(ragnarokDir, ".hati"),
+		"skoll":  filepath.Join(ragnarokDir, ".skoll"),
+		"tyr":    filepath.Join(ragnarokDir, ".tyr"),
 	}
 
 	targetDir, ok := plugins[plugin]
@@ -723,7 +726,7 @@ func runInit(projectName, baseDir string) {
 
 	if baseDir == "" {
 		home, _ := os.UserHomeDir()
-		baseDir = home
+		baseDir = filepath.Join(home, ".ragnarok")
 	}
 
 	fmt.Printf("Ragnarok Init - Initializing all plugins\n")
