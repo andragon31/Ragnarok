@@ -12,7 +12,7 @@ import (
 
 func (s *Server) handleProjectScan(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
-		ProjectPath string `json:"project_path"`
+		ProjectPath string `json:"path"`
 		Layer       string `json:"layer,omitempty"`
 	}
 

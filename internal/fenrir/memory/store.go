@@ -118,9 +118,9 @@ func (s *MemoryStore) SaveObservation(obs *Observation) error {
 	query := `INSERT INTO observations (id, session_id, type, content, authority, module, file, line, tags, created_at, updated_at, token_count)
 			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	tagsJSON := fmt.Sprintf("[%s]", joinStrings(obs.Tags, ","))
-	var sessionID interface{}
+	var sessionID *string
 	if obs.SessionID != "" {
-		sessionID = obs.SessionID
+		sessionID = &obs.SessionID
 	}
 	_, err := s.db.Exec(query, obs.ID, sessionID, obs.Type, obs.Content, obs.Authority, obs.Module, obs.File, obs.Line, tagsJSON, obs.CreatedAt, obs.UpdatedAt, obs.TokenCount)
 	return err

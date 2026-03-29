@@ -99,7 +99,88 @@ func (s *Server) registerHandlers(dataDir string) error {
 			s.dbPaths["fenrir"] = filepath.Join(fCfg.DataDir, "fenrir.db")
 			fSrv := fenrirmcp.NewServer(fCfg, fDB)
 			for k, v := range fSrv.Handlers() {
-				s.handlers[k] = v
+				if k == "mem_save" {
+					originalHandler := v
+					s.handlers[k] = func(ctx context.Context, req *mcp.Request) (*mcp.Response, error) {
+						var unifiedParams struct {
+							Title   string `json:"title"`
+							Type    string `json:"type"`
+							What    string `json:"what"`
+							Why     string `json:"why"`
+							Where   string `json:"where"`
+							Learned string `json:"learned"`
+						}
+						if err := json.Unmarshal(req.Params, &unifiedParams); err != nil {
+							return originalHandler(ctx, req)
+						}
+						content := unifiedParams.Title
+						if unifiedParams.What != "" {
+							if content != "" {
+								content += "\n\n"
+							}
+							content += "Qué: " + unifiedParams.What
+						}
+						if unifiedParams.Why != "" {
+							if content != "" {
+								content += "\n\n"
+							}
+							content += "Por qué: " + unifiedParams.Why
+						}
+						if unifiedParams.Where != "" {
+							if content != "" {
+								content += "\n\n"
+							}
+							content += "Dónde: " + unifiedParams.Where
+						}
+						if unifiedParams.Learned != "" {
+							if content != "" {
+								content += "\n\n"
+							}
+							content += "Aprendido: " + unifiedParams.Learned
+						}
+						transformedParams := map[string]interface{}{
+							"type":    unifiedParams.Type,
+							"content": content,
+							"file":    unifiedParams.Where,
+						}
+						transformedJSON, _ := json.Marshal(transformedParams)
+						return originalHandler(ctx, &mcp.Request{
+							Method: req.Method,
+							Params: transformedJSON,
+						})
+					}
+				} else if k == "spec_save" {
+					originalHandler := v
+					s.handlers[k] = func(ctx context.Context, req *mcp.Request) (*mcp.Response, error) {
+						var unifiedParams struct {
+							Name        string `json:"name"`
+							Description string `json:"description"`
+							Content     string `json:"content"`
+						}
+						if err := json.Unmarshal(req.Params, &unifiedParams); err != nil {
+							return originalHandler(ctx, req)
+						}
+						content := unifiedParams.Content
+						if unifiedParams.Description != "" {
+							if content != "" {
+								content = unifiedParams.Description + "\n\n" + content
+							} else {
+								content = unifiedParams.Description
+							}
+						}
+						transformedParams := map[string]interface{}{
+							"title":   unifiedParams.Name,
+							"content": content,
+						}
+						transformedJSON, _ := json.Marshal(transformedParams)
+						return originalHandler(ctx, &mcp.Request{
+							Method: req.Method,
+							Params: transformedJSON,
+						})
+					}
+				} else {
+					s.handlers[k] = v
+				}
 				s.tools = append(s.tools, Tool{
 					Name:        k,
 					Description: getToolDescription(k),
@@ -128,7 +209,27 @@ func (s *Server) registerHandlers(dataDir string) error {
 				s.dbPaths["hati"] = hCfg.DBPath()
 				hSrv := hatimcp.NewServer(hCfg, hDB)
 				for k, v := range hSrv.Handlers() {
-					s.handlers[k] = v
+					if k == "hati_commit_info" {
+						originalHandler := v
+						s.handlers[k] = func(ctx context.Context, req *mcp.Request) (*mcp.Response, error) {
+							var unifiedParams struct {
+								Commit string `json:"commit"`
+							}
+							if err := json.Unmarshal(req.Params, &unifiedParams); err != nil {
+								return originalHandler(ctx, req)
+							}
+							transformedParams := map[string]interface{}{
+								"commit_hash": unifiedParams.Commit,
+							}
+							transformedJSON, _ := json.Marshal(transformedParams)
+							return originalHandler(ctx, &mcp.Request{
+								Method: req.Method,
+								Params: transformedJSON,
+							})
+						}
+					} else {
+						s.handlers[k] = v
+					}
 					s.tools = append(s.tools, Tool{
 						Name:        k,
 						Description: getToolDescription(k),
@@ -158,7 +259,31 @@ func (s *Server) registerHandlers(dataDir string) error {
 				s.dbPaths["skoll"] = skCfg.DBPath()
 				skSrv := skollmcp.NewServer(skCfg, skDB)
 				for k, v := range skSrv.Handlers() {
-					s.handlers[k] = v
+					if k == "agent_handoff" {
+						originalHandler := v
+						s.handlers[k] = func(ctx context.Context, req *mcp.Request) (*mcp.Response, error) {
+							var unifiedParams struct {
+								From     string `json:"from"`
+								To       string `json:"to"`
+								Contract string `json:"contract,omitempty"`
+							}
+							if err := json.Unmarshal(req.Params, &unifiedParams); err != nil {
+								return originalHandler(ctx, req)
+							}
+							transformedParams := map[string]interface{}{
+								"from_agent": unifiedParams.From,
+								"to_agent":   unifiedParams.To,
+								"contract":   unifiedParams.Contract,
+							}
+							transformedJSON, _ := json.Marshal(transformedParams)
+							return originalHandler(ctx, &mcp.Request{
+								Method: req.Method,
+								Params: transformedJSON,
+							})
+						}
+					} else {
+						s.handlers[k] = v
+					}
 					s.tools = append(s.tools, Tool{
 						Name:        k,
 						Description: getToolDescription(k),
@@ -489,6 +614,13 @@ func getToolInputSchema(name string) string {
 		"spec_delta":          `{"type":"object","properties":{"base":{"type":"string"},"head":{"type":"string"}}}`,
 		"spec_impact":         `{"type":"object","properties":{"module":{"type":"string"}}}`,
 		"spec_check":          `{"type":"object","properties":{"module":{"type":"string"}}}`,
+		"project_scan":        `{"type":"object","properties":{"path":{"type":"string"},"layer":{"type":"string","enum":["stack","architecture","modules","patterns","config","all"]}},"required":["path"]}`,
+		"project_bootstrap":   `{"type":"object","properties":{"project_path":{"type":"string"}},"required":["project_path"]}`,
+		"skill_generate":      `{"type":"object","properties":{"project_path":{"type":"string"}},"required":["project_path"]}`,
+		"rules_generate":      `{"type":"object","properties":{"project_path":{"type":"string"}},"required":["project_path"]}`,
+		"standards_generate":  `{"type":"object","properties":{"project_path":{"type":"string"}},"required":["project_path"]}`,
+		"prompt_analyze":      `{"type":"object","properties":{}}`,
+		"agents_md_get":       `{"type":"object","properties":{"project_path":{"type":"string"}}}`,
 
 		// Hati (Planning) - Correcciones críticas plan_id y consistencia
 		"plan_create":          `{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"risk_level":{"type":"string","enum":["low","medium","high","critical"]},"phases":{"type":"array","items":{"type":"string"}}},"required":["title"]}`,
@@ -526,6 +658,7 @@ func getToolInputSchema(name string) string {
 		"human_review_decide":      `{"type":"object","properties":{"review_id":{"type":"string"},"decision":{"type":"string","enum":["approved","rejected"]},"notes":{"type":"string"}},"required":["review_id","decision"]}`,
 		"prd_parse":                `{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"]}`,
 		"prd_requirements_extract": `{"type":"object","properties":{"prd_id":{"type":"string"}},"required":["prd_id"]}`,
+		"hati_register_commit":     `{"type":"object","properties":{"plan_id":{"type":"string"},"commit_hash":{"type":"string"}},"required":["plan_id","commit_hash"]}`,
 
 		// Skoll (Orchestration) - Correcciones tipo de agente y consistencia
 		"agent_create":           `{"type":"object","properties":{"name":{"type":"string"},"agent_type":{"type":"string","enum":["backend","frontend","qa","devops","security","docs"]},"skills":{"type":"array","items":{"type":"string"}}},"required":["name","agent_type"]}`,
@@ -547,15 +680,18 @@ func getToolInputSchema(name string) string {
 		"task_complete":  `{"type":"object","properties":{"execution_id":{"type":"string"},"result":{"type":"string"},"error":{"type":"string"}},"required":["execution_id"]}`,
 		"task_cancel":    `{"type":"object","properties":{"execution_id":{"type":"string"},"reason":{"type":"string"}},"required":["execution_id"]}`,
 
-		"skill_list":      `{"type":"object","properties":{"limit":{"type":"integer"}}}`,
-		"skill_load":      `{"type":"object","properties":{"skill_name":{"type":"string"}},"required":["skill_name"]}`,
-		"skill_search":    `{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`,
-		"skill_verify":    `{"type":"object","properties":{"skill_name":{"type":"string"}},"required":["skill_name"]}`,
-		"skill_read_file": `{"type":"object","properties":{"skill_name":{"type":"string"},"file_path":{"type":"string"}},"required":["skill_name","file_path"]}`,
+		"skill_list":          `{"type":"object","properties":{"limit":{"type":"integer"}}}`,
+		"skill_load":          `{"type":"object","properties":{"skill_name":{"type":"string"}},"required":["skill_name"]}`,
+		"skill_search":        `{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`,
+		"skill_verify":        `{"type":"object","properties":{"skill_name":{"type":"string"}},"required":["skill_name"]}`,
+		"skill_version_check": `{"type":"object","properties":{"skill_name":{"type":"string"},"version":{"type":"string"}},"required":["skill_name"]}`,
+		"skills_import":       `{"type":"object","properties":{"source":{"type":"string"},"query":{"type":"string"},"url":{"type":"string"}},"required":["source"]}`,
+		"skill_read_file":     `{"type":"object","properties":{"skill_name":{"type":"string"},"file_path":{"type":"string"}},"required":["skill_name","file_path"]}`,
 
-		"rule_list":  `{"type":"object","properties":{"category":{"type":"string"},"limit":{"type":"integer"}}}`,
-		"rule_check": `{"type":"object","properties":{"action":{"type":"string"}},"required":["action"]}`,
-		"rule_get":   `{"type":"object","properties":{"rule_id":{"type":"string"}},"required":["rule_id"]}`,
+		"rule_list":        `{"type":"object","properties":{"category":{"type":"string"},"limit":{"type":"integer"}}}`,
+		"rule_check":       `{"type":"object","properties":{"action":{"type":"string"}},"required":["action"]}`,
+		"rule_get":         `{"type":"object","properties":{"rule_id":{"type":"string"}},"required":["rule_id"]}`,
+		"bootstrap_import": `{"type":"object","properties":{"project_path":{"type":"string"},"skills_only":{"type":"boolean"},"rules_only":{"type":"boolean"}},"required":["project_path"]}`,
 
 		// Tyr (Quality)
 		"quality_gate":       `{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`,
@@ -564,6 +700,7 @@ func getToolInputSchema(name string) string {
 		"standard_run_all":   `{"type":"object","properties":{}}`,
 		"precommit_validate": `{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`,
 		"pkg_check":          `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`,
+		"pkg_audit":          `{"type":"object","properties":{"project_path":{"type":"string"}}}`,
 
 		// Workflows
 		"workflow_project_lifecycle": `{"type":"object","properties":{"project_path":{"type":"string"},"prd_file":{"type":"string"}},"required":["project_path"]}`,

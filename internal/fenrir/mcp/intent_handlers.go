@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -310,7 +311,7 @@ func (s *Server) handleMemSessionCheckpoint(ctx context.Context, req *Request) (
 
 func (s *Server) handleMemGetObservation(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
-		ObservationID string `json:"observation_id"`
+		ObservationID string `json:"id"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -321,12 +322,21 @@ func (s *Server) handleMemGetObservation(ctx context.Context, req *Request) (*Re
 			  FROM observations WHERE id = ?`
 	obs := &memory.Observation{}
 	var tags string
+	var sessionID, authority, module, file sql.NullString
+	var line sql.NullInt64
 	err := s.db.QueryRow(query, params.ObservationID).Scan(
-		&obs.ID, &obs.SessionID, &obs.Type, &obs.Content, &obs.Authority,
-		&obs.Module, &obs.File, &obs.Line, &tags, &obs.CreatedAt, &obs.UpdatedAt,
+		&obs.ID, &sessionID, &obs.Type, &obs.Content, &authority,
+		&module, &file, &line, &tags, &obs.CreatedAt, &obs.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("observation not found: %w", err)
+	}
+	obs.SessionID = sessionID.String
+	obs.Authority = authority.String
+	obs.Module = module.String
+	obs.File = file.String
+	if line.Valid {
+		obs.Line = int(line.Int64)
 	}
 
 	return &Response{

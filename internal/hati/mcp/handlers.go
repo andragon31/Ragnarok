@@ -510,6 +510,28 @@ func (s *Server) handlePhaseStart(ctx context.Context, req *Request) (*Response,
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	existingQuery := `SELECT id, status FROM phases WHERE plan_id = ? AND name = ?`
+	var existingID string
+	var existingStatus string
+	err := s.db.QueryRow(existingQuery, params.PlanID, params.Name).Scan(&existingID, &existingStatus)
+	if err == nil {
+		updateQuery := `UPDATE phases SET status = 'in_progress', updated_at = ? WHERE id = ?`
+		_, err := s.db.Exec(updateQuery, time.Now(), existingID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update phase: %w", err)
+		}
+		return &Response{
+			Result: map[string]interface{}{
+				"id":         existingID,
+				"plan_id":    params.PlanID,
+				"name":       params.Name,
+				"status":     "in_progress",
+				"order_num":  0,
+				"started_at": time.Now(),
+			},
+		}, nil
+	}
+
 	orderQuery := `SELECT COALESCE(MAX(order_num), 0) + 1 FROM phases WHERE plan_id = ?`
 	var orderNum int
 	if err := s.db.QueryRow(orderQuery, params.PlanID).Scan(&orderNum); err != nil {
@@ -530,7 +552,7 @@ func (s *Server) handlePhaseStart(ctx context.Context, req *Request) (*Response,
 
 	query := `INSERT INTO phases (id, plan_id, name, risk_level, status, order_num, module, created_at, updated_at)
 			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := s.db.Exec(query, phase.ID, phase.PlanID, phase.Name, phase.RiskLevel, phase.Status, phase.OrderNum, phase.Module, phase.CreatedAt, phase.UpdatedAt)
+	_, err = s.db.Exec(query, phase.ID, phase.PlanID, phase.Name, phase.RiskLevel, phase.Status, phase.OrderNum, phase.Module, phase.CreatedAt, phase.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start phase: %w", err)
 	}
