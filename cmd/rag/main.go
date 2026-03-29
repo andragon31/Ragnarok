@@ -25,7 +25,7 @@ import (
 	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
-var version = "2.3.6"
+var version = "2.3.7"
 
 func toInt(v interface{}) int {
 	if v == nil {
@@ -1941,10 +1941,47 @@ func printWorkflowResult(workflow string, result interface{}) {
 			}
 		}
 
+	case "continue", "review":
+		if steps, ok := m["steps"].([]interface{}); ok {
+			if len(steps) == 0 {
+				fmt.Println("   (No actions performed)")
+			}
+			for _, s := range steps {
+				sm, ok := s.(map[string]interface{})
+				if !ok { continue }
+				
+				name, _ := sm["name"].(string)
+				status, _ := sm["status"].(string)
+				icon := "○"
+				if status == "success" {
+					icon = "✓"
+				} else if status == "error" {
+					icon = "❌"
+				} else if status == "in_progress" {
+					icon = "▶"
+				}
+
+				fmt.Printf("   %s [%s] %s\n", icon, status, name)
+				if out, ok := sm["output"].(string); ok && out != "" {
+					fmt.Printf("      Output: %s\n", out)
+				}
+				if err, ok := sm["error"].(string); ok && err != "" {
+					fmt.Printf("      Error: %s\n", err)
+				}
+			}
+		}
+
 	default:
 		// Generic steps print
 		if steps, ok := m["steps"].([]interface{}); ok {
-			fmt.Printf("   Steps completed: %d\n", len(steps))
+			fmt.Printf("   Steps performed: %d\n", len(steps))
+			for i, s := range steps {
+				if i >= 3 && len(steps) > 5 { // Limit generic output
+					fmt.Printf("   ... and %d more steps\n", len(steps)-3)
+					break
+				}
+				fmt.Printf("   - %v\n", s)
+			}
 		}
 	}
 }
