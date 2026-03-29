@@ -1,4 +1,4 @@
-# Ragnarok Ecosystem v2.2.3
+# Ragnarok Ecosystem v2.2.4
 
 **AI Governance & Autonomous Development Ecosystem**
 
@@ -274,7 +274,8 @@ graph TD
 ## Instalación
 
 ```powershell
-irm https://raw.githubusercontent.com/andragon31/Ragnarok/v2.1.0/install.ps1 | iex
+# Install v2.2.4 (actual)
+irm https://raw.githubusercontent.com/andragon31/Ragnarok/v2.2.4/install.ps1 | iex
 ```
 
 ---
