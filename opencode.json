@@ -3,7 +3,7 @@
   "mcp": {
     "ragnarok": {
       "type": "local",
-      "command": ["C:/Users/Andragon/AppData/Local/Ragnarok/bin/rag.exe", "mcp"],
+      "command": ["rag", "mcp"],
       "enabled": true
     }
   }

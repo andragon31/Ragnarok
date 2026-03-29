@@ -1,62 +1,67 @@
 # Ragnarok Ecosystem Makefile
 
-.PHONY: all build test clean install help
+VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS  := -ldflags="-s -w -X main.version=$(VERSION)"
+BIN_DIR  := bin
 
-# Go commands
-GO := go
-GOFLAGS := -ldflags="-s -w"
+ifeq ($(OS),Windows_NT)
+    BINARY := $(BIN_DIR)/rag.exe
+    INSTALL_DIR := $(LOCALAPPDATA)\Ragnarok
+else
+    BINARY := $(BIN_DIR)/rag
+    INSTALL_DIR := $(HOME)/.local/bin
+endif
 
-# Binary output
-BIN_DIR := bin
-RAG_BIN := $(BIN_DIR)/rag.exe
+.PHONY: all build test clean install lint release help
 
 all: build
 
 build:
-	@echo "Building Ragnarok Unified MCP Server..."
-	mkdir -p $(BIN_DIR)
-	$(GO) build $(GOFLAGS) -o $(RAG_BIN) ./cmd/rag
-	@echo "✓ Ragnarok built"
-	@echo ""
-	@echo "  rag serve     Start MCP server (stdio mode)"
-	@echo "  rag init      Initialize all plugins"
-	@echo "  rag scan      Scan project and bootstrap"
-	@echo "  rag stats     Show ecosystem health"
+	@echo "Building Ragnarok $(VERSION)..."
+	@mkdir -p $(BIN_DIR)
+	go build $(LDFLAGS) -o $(BINARY) ./cmd/rag
+	@echo "Built: $(BINARY)"
+
+build-all:
+	@echo "Cross-compiling for all platforms..."
+	@mkdir -p $(BIN_DIR)
+	GOOS=linux   GOARCH=amd64  go build $(LDFLAGS) -o $(BIN_DIR)/rag_linux_amd64   ./cmd/rag
+	GOOS=linux   GOARCH=arm64  go build $(LDFLAGS) -o $(BIN_DIR)/rag_linux_arm64   ./cmd/rag
+	GOOS=darwin  GOARCH=amd64  go build $(LDFLAGS) -o $(BIN_DIR)/rag_darwin_amd64  ./cmd/rag
+	GOOS=darwin  GOARCH=arm64  go build $(LDFLAGS) -o $(BIN_DIR)/rag_darwin_arm64  ./cmd/rag
+	GOOS=windows GOARCH=amd64  go build $(LDFLAGS) -o $(BIN_DIR)/rag_windows_amd64.exe ./cmd/rag
 
 test:
-	@echo "Running tests..."
-	$(GO) test ./...
-
-clean:
-	@echo "Cleaning..."
-	rm -rf $(BIN_DIR)
-	@echo "✓ Clean complete"
-
-install: build
-	@echo "Installing to ~/.local/bin..."
-	mkdir -p ~/.local/bin
-	cp $(RAG_BIN) ~/.local/bin/
-	@echo "✓ Installed to ~/.local/bin/rag.exe"
-
-deps:
-	$(GO) mod tidy
+	go test ./...
 
 lint:
-	$(GO) vet ./...
+	go vet ./...
+
+clean:
+	rm -rf $(BIN_DIR)
+
+install: build
+	@echo "Installing to $(INSTALL_DIR)..."
+	@mkdir -p $(INSTALL_DIR)
+	cp $(BINARY) $(INSTALL_DIR)/
+	@echo "Installed"
+
+deps:
+	go mod tidy
+
+release:
+	@echo "Creating release $(VERSION)..."
+	goreleaser release --clean
 
 help:
-	@echo "Ragnarok v1.4.0 - AI Governance & Memory Layer Ecosystem"
+	@echo "Ragnarok $(VERSION) - AI Governance & Autonomous Development Ecosystem"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build     Build rag.exe (unified MCP server)"
-	@echo "  test      Run all tests"
-	@echo "  clean     Remove build artifacts"
-	@echo "  install   Build and install to ~/.local/bin"
-	@echo "  deps      Download dependencies"
-	@echo "  lint      Run linters"
-	@echo ""
-	@echo "Usage:"
-	@echo "  rag serve              Start unified MCP server"
-	@echo "  rag init --project X   Initialize plugins for project X"
-	@echo "  rag scan --path ./X    Scan project X"
-	@echo "  rag stats --ecosystem  Show ecosystem health"
+	@echo "  build       Build for current platform"
+	@echo "  build-all   Cross-compile for all platforms"
+	@echo "  test        Run all tests"
+	@echo "  lint        Run go vet"
+	@echo "  clean       Remove build artifacts"
+	@echo "  install     Build and install locally"
+	@echo "  deps        Download dependencies"
+	@echo "  release     Create GoReleaser release"

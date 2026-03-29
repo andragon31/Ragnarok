@@ -864,22 +864,15 @@ func setupOpenCode() {
 		os.Exit(1)
 	}
 
-	configDirs := []string{
-		filepath.Join(os.Getenv("APPDATA"), "opencode"),
-		filepath.Join(os.Getenv("LOCALAPPDATA"), "opencode"),
-	}
-
-	configDir := ""
-	for _, dir := range configDirs {
-		if _, err := os.Stat(dir); err == nil {
-			configDir = dir
-			break
-		}
-	}
-
-	if configDir == "" {
-		configDir = filepath.Join(os.Getenv("USERPROFILE"), ".opencode")
-		os.MkdirAll(configDir, 0755)
+	configs := []struct {
+		dir  string
+		sub  string
+		file string
+	}{
+		{os.Getenv("USERPROFILE"), ".config/opencode", "opencode.json"},
+		{os.Getenv("APPDATA"), "opencode", "opencode.json"},
+		{os.Getenv("APPDATA"), "OpenCode", "opencode.json"},
+		{os.Getenv("LOCALAPPDATA"), "opencode", "opencode.json"},
 	}
 
 	mcpConfig := map[string]interface{}{
@@ -892,23 +885,34 @@ func setupOpenCode() {
 		},
 	}
 
-	configPath := filepath.Join(configDir, "opencode.json")
-	var existingConfig map[string]interface{}
-	if data, err := os.ReadFile(configPath); err == nil {
-		json.Unmarshal(data, &existingConfig)
-	}
-
-	if existingConfig != nil {
-		if mcp, ok := existingConfig["mcp"].(map[string]interface{}); ok {
-			mcp["ragnarok"] = mcpConfig["mcp"].(map[string]interface{})["ragnarok"]
-			mcpConfig = existingConfig
+	updated := 0
+	for _, cfg := range configs {
+		if cfg.dir == "" {
+			continue
 		}
+		configDir := filepath.Join(cfg.dir, cfg.sub)
+		configPath := filepath.Join(configDir, cfg.file)
+
+		os.MkdirAll(configDir, 0755)
+
+		var existingConfig map[string]interface{}
+		if data, err := os.ReadFile(configPath); err == nil {
+			json.Unmarshal(data, &existingConfig)
+		}
+
+		if existingConfig != nil {
+			if mcp, ok := existingConfig["mcp"].(map[string]interface{}); ok {
+				mcp["ragnarok"] = mcpConfig["mcp"].(map[string]interface{})["ragnarok"]
+				mcpConfig = existingConfig
+			}
+		}
+
+		data, _ := json.MarshalIndent(mcpConfig, "", "  ")
+		os.WriteFile(configPath, data, 0644)
+		updated++
 	}
 
-	data, _ := json.MarshalIndent(mcpConfig, "", "  ")
-	os.WriteFile(configPath, data, 0644)
-
-	fmt.Printf("✓ OpenCode configured: %s\n", configPath)
+	fmt.Printf("✓ OpenCode configured: %d config files updated\n", updated)
 	fmt.Println("  Restart OpenCode to use Ragnarok MCP")
 }
 

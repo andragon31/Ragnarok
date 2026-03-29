@@ -1,8 +1,7 @@
 # Ragnarok Installer
 # AI Governance & Memory Layer Ecosystem
-# Usage: 
+# Usage:
 #   irm https://raw.githubusercontent.com/andragon31/Ragnarok/vX.X.X/install.ps1 | iex
-#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v2.2.4/install.ps1 | iex
 #   Or: powershell -File install.ps1 -Version 2.2.4
 
 param(
@@ -10,26 +9,25 @@ param(
     [string]$Version = ""
 )
 
+$REPO = "andragon31/Ragnarok"
+
 if ($Version -eq "") {
-    $VERSION = "2.2.4"
+    try {
+        $release = Invoke-RestMethod "https://api.github.com/repos/$REPO/releases/latest"
+        $VERSION = $release.tag_name.TrimStart("v")
+        Write-Host "Latest version: $VERSION" -ForegroundColor Cyan
+    } catch {
+        Write-Warn "No se pudo detectar la ultima version. Usando fallback."
+        $VERSION = "2.2.4"
+    }
 } else {
     $VERSION = $Version
 }
-$REPO_URL = "https://github.com/andragon31/Ragnarok"
 
-# Save script to temp if running from remote (irm | iex)
-if ($MyInvocation.InvocationName -eq "iex") {
-    $scriptPath = Join-Path $env:TEMP "ragnarok_install_$([guid]::NewGuid().ToString('N').Substring(0,8)).ps1"
-    $content = Get-Content $PSCommandPath -Raw
-    $content | Set-Content $scriptPath -Encoding UTF8
-    Write-Host "Script saved to: $scriptPath" -ForegroundColor Yellow
-    Write-Host "Running locally...`n" -ForegroundColor Yellow
-    & $scriptPath -InstallDir $InstallDir -Version $Version
-    Remove-Item $scriptPath -ErrorAction SilentlyContinue
-    exit
-}
-
-$ErrorActionPreference = "Continue"
+$ARCH = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
+$ASSET = "ragnarok_${VERSION}_windows_${ARCH}.zip"
+$DOWNLOAD_URL = "https://github.com/$REPO/releases/download/v$VERSION/$ASSET"
+$CHECKSUM_URL = "https://github.com/$REPO/releases/download/v$VERSION/checksums.txt"
 
 function Write-Step($message) {
     Write-Host "`n[STEP] $message" -ForegroundColor Cyan
@@ -47,10 +45,6 @@ function Write-Err($message) {
     Write-Host "[ERROR] $message" -ForegroundColor Red
 }
 
-function Test-Command($cmd) {
-    try { Get-Command $cmd -ErrorAction Stop | Out-Null; return $true } catch { return $false }
-}
-
 Write-Host @"
 
   +++  +++++  +++++  +++++  +     +++++  +++++  +++++
@@ -60,7 +54,7 @@ Write-Host @"
   +++  +++++  +++++  +++++  +++++  +++++  +++++  +++++
 
      v$VERSION - AI Governance & Memory Layer Ecosystem
-     https://github.com/andragon31/Ragnarok
+     https://github.com/$REPO
 
 "@ -ForegroundColor Cyan
 
@@ -73,115 +67,70 @@ if (!$IS_WINDOWS) {
     throw "Unsupported OS"
 }
 
-Write-Step "1. Checking prerequisites"
+Write-Step "1. Downloading binary"
 
-if (Test-Command "go") {
-    $goVersion = (go version) -match 'go([0-9]+\.[0-9]+)'
-    if ($goVersion) {
-        Write-Success "Go installed: $($Matches[1])"
-    }
-} else {
-    Write-Err "Go not found. Please install Go 1.22+ from https://go.dev/dl/"
-    throw "Go not installed"
+$zipPath = Join-Path $env:TEMP $ASSET
+Write-Host "  Downloading $ASSET..." -NoNewline
+try {
+    Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $zipPath -UseBasicParsing
+    Write-Success "Downloaded"
+} catch {
+    Write-Err "Failed to download binary"
+    Write-Host "Ensure release v$VERSION exists at https://github.com/$REPO/releases" -ForegroundColor Yellow
+    throw "Download failed"
 }
 
-if (Test-Command "git") {
-    Write-Success "Git installed"
-} else {
-    Write-Err "Git not found. Please install Git from https://git-scm.com/"
-    throw "Git not installed"
+Write-Step "2. Verifying checksum"
+
+$checksums = (Invoke-RestMethod -Uri $CHECKSUM_URL -UseBasicParsing).Content
+$expected = ($checksums -split "`n" | Where-Object { $_ -match $ASSET }) -split "\s+" | Select-Object -First 1
+$actual = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
+
+if ($actual -ne $expected) {
+    Remove-Item $zipPath -ErrorAction SilentlyContinue
+    Write-Err "Checksum mismatch. Expected: $expected, Got: $actual"
+    throw "Checksum verification failed"
 }
+Write-Success "Checksum verified"
 
-Write-Step "2. Creating installation directory"
+Write-Step "3. Installing"
 
-$TEMP_DIR = Join-Path $env:TEMP "ragnarok_build_$([guid]::NewGuid().ToString('N').Substring(0,8))"
-Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
+Remove-Item $zipPath
 
-Write-Host "  Cloning $REPO_URL (tag v$VERSION)..." -NoNewline
-
-$gitArgs = @("clone", "--depth", "1", "--branch", "v$VERSION", $REPO_URL, $TEMP_DIR)
-$gitOutput = & git @gitArgs 2>&1
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Warn "Clone failed. Trying main branch..."
-    $gitArgs = @("clone", "--depth", "1", $REPO_URL, $TEMP_DIR)
-    $gitOutput = & git @gitArgs 2>&1
-    
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "Failed to clone repository"
-        throw "Git clone failed"
-    }
-}
-
-Write-Success "Repository cloned"
-
-Write-Step "3. Building rag.exe"
-
-Push-Location $TEMP_DIR
-
-$BIN_DIR = $InstallDir
-New-Item -ItemType Directory -Path $BIN_DIR -Force | Out-Null
-
-$outFile = Join-Path $BIN_DIR "rag.exe"
-Write-Host "  Building rag.exe..." -NoNewline
-
-$buildArgs = @("build", "-ldflags=-s -w", "-o", $outFile, "./cmd/rag")
-$buildOutput = & go @buildArgs 2>&1
-
-if ($LASTEXITCODE -eq 0 -and (Test-Path $outFile)) {
+$outFile = Join-Path $InstallDir "rag.exe"
+if (Test-Path $outFile) {
     $size = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
-    Write-Success "rag.exe built ($size MB)"
+    Write-Success "Installed to $InstallDir ($size MB)"
 } else {
-    Write-Err "Failed to build rag.exe"
-    Write-Host $buildOutput -ForegroundColor Gray
-    Pop-Location
-    throw "Build failed"
+    Write-Err "Installation failed - binary not found after extraction"
+    throw "Install failed"
 }
-
-Pop-Location
-
-Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Step "4. Adding to PATH"
 
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-if ($userPath -notlike "*$BIN_DIR*") {
-    $newPath = "$userPath;$BIN_DIR"
-    [Environment]::SetEnvironmentVariable('PATH', $newPath, 'User')
-    $env:PATH = $newPath
-    Write-Success "Added to PATH: $BIN_DIR"
+if ($userPath -notlike "*$InstallDir*") {
+    [Environment]::SetEnvironmentVariable('PATH', "$userPath;$InstallDir", 'User')
+    $env:PATH = "$env:PATH;$InstallDir"
+    Write-Success "Added to PATH: $InstallDir"
 } else {
     Write-Success "Already in PATH"
 }
 
-Write-Step "5. Setting up OpenCode MCP integration"
+Write-Step "5. Verifying installation"
 
-try {
-    $setupOutput = & $outFile setup opencode 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "OpenCode MCP configured"
-    } else {
-        Write-Warn "OpenCode setup skipped (may not be installed)"
-        if ($setupOutput) { Write-Host $setupOutput -ForegroundColor Gray }
-    }
-} catch {
-    Write-Warn "OpenCode not detected, skipping MCP setup"
-}
-
-Write-Step "6. Verifying installation"
-
-$version = & $outFile version 2>$null
-if ($LASTEXITCODE -eq 0 -and $version) {
-    Write-Success $version
+$ragVersion = & $outFile version 2>$null
+if ($LASTEXITCODE -eq 0 -and $ragVersion) {
+    Write-Success $ragVersion
 } else {
-    Write-Err "rag.exe verification failed"
+    Write-Err "Verification failed"
 }
 
 Write-Host "`n---------------------------------------------------------------" -ForegroundColor Cyan
 Write-Host "  INSTALLATION COMPLETE!" -ForegroundColor Green
 Write-Host "---------------------------------------------------------------`n" -ForegroundColor Cyan
-
-Write-Host "That's it! OpenCode will automatically use Ragnarok MCP.`n" -ForegroundColor White
 
 Write-Host "Usage:" -ForegroundColor White
 Write-Host "  rag init --project NAME    Initialize plugins for a project" -ForegroundColor Yellow
@@ -189,7 +138,5 @@ Write-Host "  rag scan --path ./project   Scan and bootstrap a project" -Foregro
 Write-Host "  rag setup opencode         Re-configure OpenCode MCP" -ForegroundColor Yellow
 Write-Host "  rag --help                 Show all commands" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "No servers needed! rag mcp runs via stdio like Engram.`n" -ForegroundColor Gray
-
-Write-Host "Documentation: https://github.com/andragon31/Ragnarok" -ForegroundColor Gray
+Write-Host "Documentation: https://github.com/$REPO" -ForegroundColor Gray
 Write-Host ""

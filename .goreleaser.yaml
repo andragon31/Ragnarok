@@ -1,0 +1,48 @@
+version: 2
+
+project_name: ragnarok
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: rag
+    main: ./cmd/rag
+    binary: rag
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: rag
+    builds:
+      - rag
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+release:
+  github:
+    owner: andragon31
+    name: Ragnarok
+  name_template: "Ragnarok v{{.Version}}"
