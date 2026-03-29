@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -23,7 +24,7 @@ import (
 	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
-var version = "2.2.2"
+var version = "2.2.3"
 
 type Plugin struct {
 	Name    string
@@ -130,6 +131,34 @@ func main() {
 	reinstallBackup := reinstallCmd.Bool("backup", true, "Backup before reinstalling")
 	reinstallForce := reinstallCmd.Bool("force", false, "Skip confirmation prompt")
 
+	doctorCmd := flag.NewFlagSet("doctor", flag.ExitOnError)
+	doctorVerbose := doctorCmd.Bool("verbose", false, "Show detailed output")
+
+	cleanupCmd := flag.NewFlagSet("cleanup", flag.ExitOnError)
+	cleanupForce := cleanupCmd.Bool("force", false, "Skip confirmation prompt")
+	cleanupOptimize := cleanupCmd.Bool("optimize", false, "Optimize databases after cleanup")
+
+	migrateCmd := flag.NewFlagSet("migrate", flag.ExitOnError)
+	migratePlugin := migrateCmd.String("plugin", "all", "Plugin to migrate (fenrir, hati, skoll, tyr, all)")
+
+	infoCmd := flag.NewFlagSet("info", flag.ExitOnError)
+
+	configCmd := flag.NewFlagSet("config", flag.ExitOnError)
+	configPlugin := configCmd.String("plugin", "", "Plugin name (fenrir, hati, skoll, tyr)")
+	configKey := configCmd.String("key", "", "Config key")
+	configValue := configCmd.String("value", "", "Config value (if setting)")
+
+	exportCmd := flag.NewFlagSet("export", flag.ExitOnError)
+	exportPlugin := exportCmd.String("plugin", "all", "Plugin to export (fenrir, hati, skoll, tyr, all)")
+	exportFile := exportCmd.String("file", "", "Export file path")
+
+	importCmd := flag.NewFlagSet("import", flag.ExitOnError)
+	importFile := importCmd.String("file", "", "Import file path")
+	importPlugin := importCmd.String("plugin", "all", "Plugin to import (fenrir, hati, skoll, tyr, all)")
+
+	serverCmd := flag.NewFlagSet("server", flag.ExitOnError)
+	serverAction := serverCmd.String("action", "status", "Action: status, start, stop, restart")
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
@@ -205,6 +234,30 @@ func main() {
 	case "reinstall":
 		reinstallCmd.Parse(os.Args[2:])
 		runReinstall(*reinstallBackup, *reinstallForce)
+	case "doctor":
+		doctorCmd.Parse(os.Args[2:])
+		runDoctor(*doctorVerbose)
+	case "cleanup":
+		cleanupCmd.Parse(os.Args[2:])
+		runCleanup(*cleanupForce, *cleanupOptimize)
+	case "migrate":
+		migrateCmd.Parse(os.Args[2:])
+		runMigrate(*migratePlugin)
+	case "info":
+		infoCmd.Parse(os.Args[2:])
+		runInfo()
+	case "config":
+		configCmd.Parse(os.Args[2:])
+		runConfig(*configPlugin, *configKey, *configValue)
+	case "export":
+		exportCmd.Parse(os.Args[2:])
+		runExport(*exportPlugin, *exportFile)
+	case "import":
+		importCmd.Parse(os.Args[2:])
+		runImport(*importFile, *importPlugin)
+	case "server":
+		serverCmd.Parse(os.Args[2:])
+		runServer(*serverAction)
 	case "version":
 		fmt.Printf("Ragnarok v%s\n", version)
 		fmt.Println("AI Governance & Memory Layer Ecosystem")
@@ -569,7 +622,7 @@ func runIntegrate(projectPath string) {
 }
 
 func printUsage() {
-	fmt.Println(`Ragnarok v2.2.2 - AI Governance & Memory Layer
+	fmt.Println(`Ragnarok v2.2.3 - AI Governance & Memory Layer
 
 Usage:
   rag project --path DIR [--prd FILE]      Analyze or init project (Recommended)
@@ -1555,10 +1608,12 @@ func stopRagnarokServers() {
 }
 
 func initializeDatabases(home string) {
-	fenrirDir := filepath.Join(home, ".fenrir")
-	hatiDir := filepath.Join(home, ".hati")
-	skollDir := filepath.Join(home, ".skoll")
-	tyrDir := filepath.Join(home, ".tyr")
+	baseDir := filepath.Join(home, ".ragnarok")
+
+	fenrirDir := filepath.Join(baseDir, ".fenrir")
+	hatiDir := filepath.Join(baseDir, ".hati")
+	skollDir := filepath.Join(baseDir, ".skoll")
+	tyrDir := filepath.Join(baseDir, ".tyr")
 
 	if db, err := fenrirdb.NewDB(filepath.Join(fenrirDir, "fenrir.db")); err == nil {
 		fenrirdb.InitSchema(db)
@@ -1734,4 +1789,592 @@ func findPluginBinary(name string) string {
 	}
 
 	return ""
+}
+
+func runDoctor(verbose bool) {
+	fmt.Printf("Ragnarok Doctor - Health Check\n")
+	fmt.Println(strings.Repeat("=", 50))
+
+	home, _ := os.UserHomeDir()
+	baseDir := filepath.Join(home, ".ragnarok")
+	issues := 0
+	checks := 0
+
+	plugins := map[string]string{
+		"fenrir": filepath.Join(baseDir, ".fenrir"),
+		"hati":   filepath.Join(baseDir, ".hati"),
+		"skoll":  filepath.Join(baseDir, ".skoll"),
+		"tyr":    filepath.Join(baseDir, ".tyr"),
+	}
+
+	for name, dir := range plugins {
+		checks++
+		fmt.Printf("\n[%s]\n", strings.ToUpper(name))
+		fmt.Printf("  Directory: %s\n", dir)
+
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			fmt.Printf("  ❌ Directory does not exist\n")
+			issues++
+			continue
+		}
+		fmt.Printf("  ✅ Directory exists\n")
+
+		dbPath := filepath.Join(dir, name+".db")
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			fmt.Printf("  ❌ Database file does not exist: %s\n", dbPath)
+			issues++
+		} else {
+			fmt.Printf("  ✅ Database exists: %s\n", dbPath)
+			if verbose {
+				info, _ := os.Stat(dbPath)
+				fmt.Printf("     Size: %d bytes\n", info.Size())
+			}
+		}
+
+		configPath := filepath.Join(dir, "config.json")
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			if verbose {
+				fmt.Printf("  ⚠️  Config file does not exist (optional)\n")
+			}
+		} else {
+			fmt.Printf("  ✅ Config exists\n")
+		}
+	}
+
+	fmt.Printf("\n%s\n", strings.Repeat("=", 50))
+	fmt.Printf("Database Check (via unified server):\n")
+	srv, err := unified.NewServer("")
+	if err != nil {
+		fmt.Printf("  ❌ Failed to initialize server: %v\n", err)
+		issues++
+	} else {
+		fmt.Printf("  ✅ Unified server initialized\n")
+		fmt.Printf("  ✅ Tools registered: %d\n", len(srv.ListTools()))
+	}
+
+	for _, name := range []string{"fenrir", "hati", "skoll", "tyr"} {
+		dbPath := filepath.Join(baseDir, "."+name, name+".db")
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			fmt.Printf("  ❌ %s: Cannot open database\n", name)
+			issues++
+			continue
+		}
+
+		var version string
+		err = db.QueryRow("PRAGMA user_version").Scan(&version)
+		if err == nil && verbose {
+			fmt.Printf("  ✅ %s DB accessible (user_version: %s)\n", name, version)
+		} else if err == nil {
+			fmt.Printf("  ✅ %s DB accessible\n", name)
+		} else {
+			fmt.Printf("  ❌ %s: %v\n", name, err)
+			issues++
+		}
+		db.Close()
+	}
+
+	fmt.Printf("\n%s\n", strings.Repeat("=", 50))
+	if issues == 0 {
+		fmt.Printf("✅ All checks passed! Ragnarok is healthy.\n")
+	} else {
+		fmt.Printf("❌ %d issue(s) found. Run 'rag cleanup --optimize' to fix.\n", issues)
+	}
+}
+
+func runCleanup(force bool, optimize bool) {
+	if !force {
+		fmt.Println("⚠️  This will clean up WAL files, temporary files, and optimize databases!")
+		fmt.Println("")
+		fmt.Print("Type 'yes' to confirm: ")
+		var confirm string
+		fmt.Scanln(&confirm)
+		if confirm != "yes" {
+			fmt.Println("Cancelled.")
+			os.Exit(0)
+		}
+	}
+
+	home, _ := os.UserHomeDir()
+	baseDir := filepath.Join(home, ".ragnarok")
+
+	fmt.Printf("Ragnarok Cleanup\n")
+	fmt.Println(strings.Repeat("=", 50))
+
+	plugins := []string{"fenrir", "hati", "skoll", "tyr"}
+	totalCleaned := int64(0)
+
+	for _, name := range plugins {
+		dir := filepath.Join(baseDir, "."+name)
+		dbPath := filepath.Join(dir, name+".db")
+
+		fmt.Printf("\n[%s]\n", strings.ToUpper(name))
+
+		for _, ext := range []string{"-wal", "-shm"} {
+			path := dbPath + ext
+			if info, err := os.Stat(path); err == nil {
+				size := info.Size()
+				os.Remove(path)
+				fmt.Printf("  🗑️  Removed %s (%d bytes)\n", ext, size)
+				totalCleaned += size
+			}
+		}
+
+		if optimize {
+			db, err := sql.Open("sqlite", dbPath)
+			if err == nil {
+				db.Exec("VACUUM")
+				db.Exec("ANALYZE")
+				fmt.Printf("  ✅ Database optimized\n")
+				db.Close()
+			} else {
+				fmt.Printf("  ❌ Failed to optimize: %v\n", err)
+			}
+		}
+	}
+
+	fmt.Printf("\n%s\n", strings.Repeat("=", 50))
+	fmt.Printf("✅ Cleanup complete! Total space freed: %d bytes (%.2f MB)\n", totalCleaned, float64(totalCleaned)/1024/1024)
+}
+
+func runMigrate(plugin string) {
+	home, _ := os.UserHomeDir()
+	baseDir := filepath.Join(home, ".ragnarok")
+
+	fmt.Printf("Ragnarok Migrate\n")
+	fmt.Println(strings.Repeat("=", 50))
+
+	plugins := map[string]string{
+		"fenrir": filepath.Join(baseDir, ".fenrir"),
+		"hati":   filepath.Join(baseDir, ".hati"),
+		"skoll":  filepath.Join(baseDir, ".skoll"),
+		"tyr":    filepath.Join(baseDir, ".tyr"),
+	}
+
+	migratePlugins := plugins
+	if plugin != "all" {
+		if path, ok := plugins[plugin]; ok {
+			migratePlugins = map[string]string{plugin: path}
+		} else {
+			fmt.Printf("Error: Unknown plugin '%s'\n", plugin)
+			fmt.Printf("Available: all, fenrir, hati, skoll, tyr\n")
+			os.Exit(1)
+		}
+	}
+
+	for name, dir := range migratePlugins {
+		fmt.Printf("\n[%s]\n", strings.ToUpper(name))
+		dbPath := filepath.Join(dir, name+".db")
+
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			fmt.Printf("  ❌ Cannot open database: %v\n", err)
+			continue
+		}
+
+		fmt.Printf("  🔄 Running migrations...\n")
+
+		switch name {
+		case "fenrir":
+			fenrirdb.InitSchema(db)
+		case "hati":
+			hatidb.InitSchema(db)
+		case "skoll":
+			skolldb.InitSchema(db)
+		case "tyr":
+			tyrdb.InitSchema(db)
+		}
+
+		fmt.Printf("  ✅ Migrations complete\n")
+		db.Close()
+	}
+
+	fmt.Printf("\n%s\n", strings.Repeat("=", 50))
+	fmt.Printf("✅ Migration complete!\n")
+}
+
+func runInfo() {
+	fmt.Printf("Ragnarok v%s - Information\n", version)
+	fmt.Println(strings.Repeat("=", 50))
+
+	home, _ := os.UserHomeDir()
+	baseDir := filepath.Join(home, ".ragnarok")
+
+	fmt.Printf("\n[Binary Information]\n")
+	if exe, err := os.Executable(); err == nil {
+		fmt.Printf("  Executable: %s\n", exe)
+		if info, err := os.Stat(exe); err == nil {
+			fmt.Printf("  Modified: %s\n", info.ModTime().Format("2006-01-02 15:04:05"))
+		}
+	}
+	fmt.Printf("  Version: %s\n", version)
+	fmt.Printf("  GOOS: %s\n", runtime.GOOS)
+	fmt.Printf("  GOARCH: %s\n", runtime.GOARCH)
+
+	fmt.Printf("\n[Data Directories]\n")
+	fmt.Printf("  Base: %s\n", baseDir)
+
+	plugins := map[string]string{
+		"fenrir": filepath.Join(baseDir, ".fenrir"),
+		"hati":   filepath.Join(baseDir, ".hati"),
+		"skoll":  filepath.Join(baseDir, ".skoll"),
+		"tyr":    filepath.Join(baseDir, ".tyr"),
+	}
+
+	for name, dir := range plugins {
+		fmt.Printf("  %s: %s\n", name, dir)
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			fmt.Printf("    ❌ Not found\n")
+		} else {
+			dbPath := filepath.Join(dir, name+".db")
+			if info, err := os.Stat(dbPath); err == nil {
+				fmt.Printf("    ✅ DB: %s (%.2f KB)\n", info.ModTime().Format("2006-01-02 15:04"), float64(info.Size())/1024)
+			} else {
+				fmt.Printf("    ⚠️  DB not found\n")
+			}
+		}
+	}
+
+	fmt.Printf("\n[Server Status]\n")
+	ports := []int{7437, 7438, 7439, 7440}
+	portNames := []string{"fenrir", "skoll", "hati", "tyr"}
+	for i, port := range ports {
+		cmd := exec.Command("netstat", "-ano")
+		output, _ := cmd.Output()
+		running := strings.Contains(string(output), fmt.Sprintf(":%d", port))
+		if running {
+			fmt.Printf("  %s (port %d): ✅ Running\n", portNames[i], port)
+		} else {
+			fmt.Printf("  %s (port %d): ⚪ Stopped\n", portNames[i], port)
+		}
+	}
+
+	fmt.Printf("\n%s\n", strings.Repeat("=", 50))
+}
+
+func runConfig(plugin string, key string, value string) {
+	if plugin == "" {
+		fmt.Println("Error: --plugin is required (fenrir, hati, skoll, tyr)")
+		fmt.Println("Usage: rag config --plugin <plugin> [--key <key>] [--value <value>]")
+		os.Exit(1)
+	}
+
+	home, _ := os.UserHomeDir()
+	baseDir := filepath.Join(home, ".ragnarok")
+
+	pluginDirs := map[string]string{
+		"fenrir": filepath.Join(baseDir, ".fenrir"),
+		"hati":   filepath.Join(baseDir, ".hati"),
+		"skoll":  filepath.Join(baseDir, ".skoll"),
+		"tyr":    filepath.Join(baseDir, ".tyr"),
+	}
+
+	dir, ok := pluginDirs[plugin]
+	if !ok {
+		fmt.Printf("Error: Unknown plugin '%s'\n", plugin)
+		os.Exit(1)
+	}
+
+	configPath := filepath.Join(dir, "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("Config file does not exist at %s\n", configPath)
+			fmt.Printf("Run 'rag serve' first to generate config files.\n")
+		} else {
+			fmt.Printf("Error reading config: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		fmt.Printf("Error parsing config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if key == "" {
+		fmt.Printf("[%s config]\n", plugin)
+		fmt.Println(strings.Repeat("-", 30))
+		for k, v := range config {
+			fmt.Printf("  %s: %v\n", k, v)
+		}
+		return
+	}
+
+	if value == "" {
+		if v, ok := config[key]; ok {
+			fmt.Printf("%s = %v\n", key, v)
+		} else {
+			fmt.Printf("Key '%s' not found\n", key)
+			os.Exit(1)
+		}
+		return
+	}
+
+	config[key] = value
+	data, err = json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		fmt.Printf("Error marshaling config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		fmt.Printf("Error writing config: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ %s.%s = %v\n", plugin, key, value)
+}
+
+func runExport(plugin string, filePath string) {
+	if filePath == "" {
+		fmt.Println("Error: --file is required")
+		fmt.Println("Usage: rag export --plugin <plugin> --file <path>")
+		os.Exit(1)
+	}
+
+	home, _ := os.UserHomeDir()
+	baseDir := filepath.Join(home, ".ragnarok")
+
+	plugins := map[string]string{
+		"fenrir": filepath.Join(baseDir, ".fenrir"),
+		"hati":   filepath.Join(baseDir, ".hati"),
+		"skoll":  filepath.Join(baseDir, ".skoll"),
+		"tyr":    filepath.Join(baseDir, ".tyr"),
+	}
+
+	exportPlugins := plugins
+	if plugin != "all" {
+		if path, ok := plugins[plugin]; ok {
+			exportPlugins = map[string]string{plugin: path}
+		} else {
+			fmt.Printf("Error: Unknown plugin '%s'\n", plugin)
+			os.Exit(1)
+		}
+	}
+
+	fmt.Printf("Ragnarok Export\n")
+	fmt.Println(strings.Repeat("=", 50))
+
+	exportData := make(map[string]interface{})
+	exportData["version"] = version
+	exportData["exported_at"] = time.Now().Format(time.RFC3339)
+	exportData["plugins"] = make(map[string]interface{})
+
+	for name, dir := range exportPlugins {
+		fmt.Printf("\n[%s]\n", strings.ToUpper(name))
+		dbPath := filepath.Join(dir, name+".db")
+
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			fmt.Printf("  ❌ Cannot open database: %v\n", err)
+			continue
+		}
+
+		tables, _ := db.Query("SELECT name FROM sqlite_master WHERE type='table'")
+		tableData := make(map[string][]map[string]interface{})
+
+		for tables.Next() {
+			var tableName string
+			tables.Scan(&tableName)
+			rows, err := db.Query("SELECT * FROM " + tableName)
+			if err != nil {
+				continue
+			}
+
+			cols, _ := rows.Columns()
+			var records []map[string]interface{}
+			for rows.Next() {
+				record := make(map[string]interface{})
+				values := make([]interface{}, len(cols))
+				for i := range cols {
+					values[i] = new(interface{})
+				}
+				rows.Scan(values...)
+				for i, col := range cols {
+					record[col] = *(values[i].(*interface{}))
+				}
+				records = append(records, record)
+			}
+			tableData[tableName] = records
+			rows.Close()
+		}
+		tables.Close()
+
+		exportData["plugins"].(map[string]interface{})[name] = map[string]interface{}{
+			"tables":  tableData,
+			"db_path": dbPath,
+		}
+		fmt.Printf("  ✅ Exported %d tables\n", len(tableData))
+		db.Close()
+	}
+
+	data, _ := json.MarshalIndent(exportData, "", "  ")
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		fmt.Printf("Error writing export file: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("\n%s\n", strings.Repeat("=", 50))
+	fmt.Printf("✅ Export complete! File: %s (%.2f KB)\n", filePath, float64(len(data))/1024)
+}
+
+func runImport(filePath string, plugin string) {
+	if filePath == "" {
+		fmt.Println("Error: --file is required")
+		fmt.Println("Usage: rag import --file <path> [--plugin <plugin>]")
+		os.Exit(1)
+	}
+
+	fmt.Printf("Ragnarok Import\n")
+	fmt.Println(strings.Repeat("=", 50))
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Printf("❌ Error reading file: %v\n", err)
+		os.Exit(1)
+	}
+
+	var exportData map[string]interface{}
+	if err := json.Unmarshal(data, &exportData); err != nil {
+		fmt.Printf("❌ Error parsing export file: %v\n", err)
+		os.Exit(1)
+	}
+
+	pluginsData, ok := exportData["plugins"].(map[string]interface{})
+	if !ok {
+		fmt.Printf("❌ Invalid export file format: missing plugins data\n")
+		os.Exit(1)
+	}
+
+	home, _ := os.UserHomeDir()
+	baseDir := filepath.Join(home, ".ragnarok")
+
+	plugins := map[string]string{
+		"fenrir": filepath.Join(baseDir, ".fenrir"),
+		"hati":   filepath.Join(baseDir, ".hati"),
+		"skoll":  filepath.Join(baseDir, ".skoll"),
+		"tyr":    filepath.Join(baseDir, ".tyr"),
+	}
+
+	importPlugins := plugins
+	if plugin != "all" {
+		if path, ok := plugins[plugin]; ok {
+			importPlugins = map[string]string{plugin: path}
+		} else {
+			fmt.Printf("Error: Unknown plugin '%s'\n", plugin)
+			fmt.Printf("Available: all, fenrir, hati, skoll, tyr\n")
+			os.Exit(1)
+		}
+	}
+
+	totalImported := 0
+
+	for name, dir := range importPlugins {
+		pluginData, ok := pluginsData[name].(map[string]interface{})
+		if !ok {
+			fmt.Printf("\n[%s] No data to import\n", strings.ToUpper(name))
+			continue
+		}
+
+		fmt.Printf("\n[%s]\n", strings.ToUpper(name))
+
+		tablesData, ok := pluginData["tables"].(map[string]interface{})
+		if !ok {
+			fmt.Printf("  ⚠️  No tables data found\n")
+			continue
+		}
+
+		dbPath := filepath.Join(dir, name+".db")
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			fmt.Printf("  ❌ Cannot open database: %v\n", err)
+			continue
+		}
+
+		imported := 0
+		for tableName, records := range tablesData {
+			recordsList, ok := records.([]interface{})
+			if !ok {
+				continue
+			}
+
+			for _, record := range recordsList {
+				recordMap, ok := record.(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				if err := importRecord(db, tableName, recordMap); err == nil {
+					imported++
+				}
+			}
+		}
+
+		fmt.Printf("  ✅ Imported %d records into %s\n", imported, name)
+		totalImported += imported
+		db.Close()
+	}
+
+	fmt.Printf("\n%s\n", strings.Repeat("=", 50))
+	fmt.Printf("✅ Import complete! Total records imported: %d\n", totalImported)
+}
+
+func importRecord(db *sql.DB, tableName string, record map[string]interface{}) error {
+	if len(record) == 0 {
+		return nil
+	}
+
+	columns := make([]string, 0, len(record))
+	placeholders := make([]string, 0, len(record))
+	values := make([]interface{}, 0, len(record))
+
+	for col, val := range record {
+		columns = append(columns, col)
+		placeholders = append(placeholders, "?")
+		if val == nil {
+			values = append(values, nil)
+		} else {
+			values = append(values, val)
+		}
+	}
+
+	query := fmt.Sprintf("INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
+		tableName, strings.Join(columns, ", "), strings.Join(placeholders, ", "))
+
+	_, err := db.Exec(query, values...)
+	return err
+}
+
+func runServer(action string) {
+	switch action {
+	case "status":
+		fmt.Printf("Ragnarok Server Status\n")
+		fmt.Println(strings.Repeat("=", 50))
+		ports := []int{7437, 7438, 7439, 7440}
+		names := []string{"Fenrir", "Skoll", "Hati", "Tyr"}
+		for i, port := range ports {
+			cmd := exec.Command("netstat", "-ano")
+			output, _ := cmd.Output()
+			if strings.Contains(string(output), fmt.Sprintf(":%d", port)) {
+				fmt.Printf("  %s (port %d): ✅ Running\n", names[i], port)
+			} else {
+				fmt.Printf("  %s (port %d): ⚪ Stopped\n", names[i], port)
+			}
+		}
+	case "start":
+		fmt.Printf("ℹ️  Use 'rag serve' to start the unified MCP server.\n")
+	case "stop":
+		stopRagnarokServers()
+		fmt.Printf("✅ Servers stopped.\n")
+	case "restart":
+		fmt.Printf("Stopping servers...\n")
+		stopRagnarokServers()
+		time.Sleep(1 * time.Second)
+		fmt.Printf("✅ Use 'rag serve' to start again.\n")
+	default:
+		fmt.Printf("Error: Unknown action '%s'\n", action)
+		fmt.Printf("Usage: rag server --action <status|start|stop|restart>\n")
+	}
 }

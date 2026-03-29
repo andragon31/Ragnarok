@@ -727,6 +727,10 @@ func (s *Server) handleInitialize(id interface{}) map[string]interface{} {
 	}
 }
 
+func (s *Server) ListTools() []Tool {
+	return s.tools
+}
+
 func (s *Server) handleToolsList(id interface{}) map[string]interface{} {
 	return map[string]interface{}{
 		"jsonrpc": "2.0",

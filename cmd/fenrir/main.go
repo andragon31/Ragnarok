@@ -17,7 +17,7 @@ import (
 	"github.com/andragon31/Ragnarok/internal/fenrir/scanner"
 )
 
-var version = "2.2.2"
+var version = "2.2.3"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {
