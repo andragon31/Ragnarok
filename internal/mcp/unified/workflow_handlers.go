@@ -1151,8 +1151,17 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 
 	steps := []WorkflowStep{}
 	results := map[string]interface{}{}
+	startTime := time.Now()
+	
+	// Helper to check if we are approaching IDE timeout (safe margin: 40s)
+	shouldBreak := func() bool {
+		return time.Since(startTime) > 40*time.Second
+	}
 
 	step := func(name string, fn func() (interface{}, error)) {
+		if shouldBreak() {
+			return
+		}
 		out, err := fn()
 		status := "success"
 		if err != nil {
@@ -1184,154 +1193,222 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 		projectName = "Unnamed Project"
 	}
 
-	// Memoria inicial
-	s.callTool(ctx, "mem_save", map[string]interface{}{
-		"title": "Project Initialization: " + projectName,
-		"type":  "decision",
-		"what":  fmt.Sprintf("Integrated lifecycle started for project at %s", params.ProjectPath),
-		"where": params.ProjectPath,
-	})
-
-	// 2. Fenrir: PRD Analysis
+	// 2. Fenrir: PRD Analysis (Check if already parsed)
 	var prdID string
-	if params.PRDFile != "" {
-		step("Fenrir: Parse PRD Requirements", func() (interface{}, error) {
-			return s.callTool(ctx, "prd_parse", map[string]interface{}{"file_path": params.PRDFile})
+	if params.PRDFile != "" && !shouldBreak() {
+		// Optimization: Check if this PRD was already analyzed recently
+		existingPRDs, _ := s.callTool(ctx, "mem_search", map[string]interface{}{
+			"query": params.PRDFile,
+			"type":  "prd_id",
 		})
+		
+		if prdMap, ok := existingPRDs.(map[string]interface{}); ok {
+			if matches, ok := prdMap["matches"].([]interface{}); ok && len(matches) > 0 {
+				if first, ok := matches[0].(map[string]interface{}); ok {
+					prdID, _ = first["content"].(string)
+					log.Printf("   PRD already analyzed: %s", prdID)
+					steps = append(steps, WorkflowStep{Name: "Fenrir: Parse PRD Requirements", Status: "success", Output: "Resumed from memory"})
+				}
+			}
+		}
 
-		prdResult := results["Fenrir: Parse PRD Requirements"]
-		if prdMap, ok := prdResult.(map[string]interface{}); ok {
-			if id, ok := prdMap["prd_id"].(string); ok {
-				prdID = id
-				
-				// Guardar requerimientos en memoria
-				// Optimization: save all requirements in a single batch to avoid IDE timeouts
-				if reqs, ok := prdMap["requirements"].([]interface{}); ok && len(reqs) > 0 {
-					reqsJSON, _ := json.Marshal(reqs)
-					s.callTool(ctx, "mem_save", map[string]interface{}{
-						"content":  string(reqsJSON),
-						"type":     "requirement_batch",
-						"metadata": map[string]string{"project": projectName, "source": "prd_parse"},
-					})
+		if prdID == "" {
+			step("Fenrir: Parse PRD Requirements", func() (interface{}, error) {
+				return s.callTool(ctx, "prd_parse", map[string]interface{}{"file_path": params.PRDFile})
+			})
+
+			prdResult := results["Fenrir: Parse PRD Requirements"]
+			if prdMap, ok := prdResult.(map[string]interface{}); ok {
+				if id, ok := prdMap["prd_id"].(string); ok {
+					prdID = id
+					
+					// Optimization: save all requirements in a single batch to avoid IDE timeouts
+					if reqs, ok := prdMap["requirements"].([]interface{}); ok && len(reqs) > 0 {
+						reqsJSON, _ := json.Marshal(reqs)
+						s.callTool(ctx, "mem_save", map[string]interface{}{
+							"content":  string(reqsJSON),
+							"type":     "requirement_batch",
+							"metadata": map[string]string{"project": projectName, "source": "prd_parse", "prd_file": params.PRDFile},
+						})
+						// Also save the PRD ID for future resumes
+						s.callTool(ctx, "mem_save", map[string]interface{}{
+							"content": id,
+							"type":    "prd_id",
+							"metadata": map[string]string{"file": params.PRDFile},
+						})
+					}
 				}
 			}
 		}
 	}
 
-	// 3. Skoll: Structure Setup
+	// 3. Skoll: Structure Setup (Check if team exists)
 	agentIDs := []string{}
 	typeToAgentID := make(map[string]string)
-	step("Skoll: Create Specialized Agent Team", func() (interface{}, error) {
-		if analysis == nil {
-			analysis = &scanner.ProjectAnalysis{Architecture: &scanner.ArchitectureInfo{}, Stack: &scanner.StackInfo{}}
-		}
-		recommendations := scanner.GetRecommendedAgents(analysis)
-		
-		createdIDs := []string{}
-		for _, rec := range recommendations {
-			recName := rec["name"]
-			recType := rec["type"]
-			
-			agentResult, err := s.callTool(ctx, "agent_create", map[string]interface{}{
-				"name":       recName,
-				"agent_type": recType,
-				"skills":     []string{rec["role"]},
-			})
-			
-			if err == nil {
-				if agentMap, ok := agentResult.(map[string]interface{}); ok {
-					if id, ok := agentMap["agent_id"].(string); ok {
-						createdIDs = append(createdIDs, id)
-						typeToAgentID[recType] = id
+	if !shouldBreak() {
+		existingTeams, _ := s.callTool(ctx, "team_list", map[string]interface{}{})
+		if teamMap, ok := existingTeams.(map[string]interface{}); ok {
+			if teams, ok := teamMap["teams"].([]interface{}); ok {
+				for _, t := range teams {
+					if tm, ok := t.(map[string]interface{}); ok {
+						if tm["name"] == projectName+" Team" {
+							log.Printf("   Team already exists, resuming...")
+							if ids, ok := tm["agent_ids"].([]interface{}); ok {
+								for _, id := range ids {
+									if sid, ok := id.(string); ok {
+										agentIDs = append(agentIDs, sid)
+									}
+								}
+							}
+							steps = append(steps, WorkflowStep{Name: "Skoll: Create Specialized Agent Team", Status: "success", Output: "Resumed from existing team"})
+							break
+						}
 					}
 				}
 			}
 		}
 
-		// Crear equipo en Skoll
-		teamResult, _ := s.callTool(ctx, "team_create", map[string]interface{}{
-			"name":         projectName + " Team",
-			"project_path": params.ProjectPath,
-			"agent_ids":    createdIDs,
-		})
+		if len(agentIDs) == 0 {
+			step("Skoll: Create Specialized Agent Team", func() (interface{}, error) {
+				if analysis == nil {
+					analysis = &scanner.ProjectAnalysis{Architecture: &scanner.ArchitectureInfo{}, Stack: &scanner.StackInfo{}}
+				}
+				recommendations := scanner.GetRecommendedAgents(analysis)
+				
+				createdIDs := []string{}
+				for _, rec := range recommendations {
+					recName := rec["name"]
+					recType := rec["type"]
+					
+					agentResult, err := s.callTool(ctx, "agent_create", map[string]interface{}{
+						"name":       recName,
+						"agent_type": recType,
+						"skills":     []string{rec["role"]},
+					})
+					
+					if err == nil {
+						if agentMap, ok := agentResult.(map[string]interface{}); ok {
+							if id, ok := agentMap["agent_id"].(string); ok {
+								createdIDs = append(createdIDs, id)
+								typeToAgentID[recType] = id
+							}
+						}
+					}
+				}
 
-		agentIDs = createdIDs
-		return teamResult, nil
-	})
-
-	// 4. Tyr: Initial Quality Scan
-	step("Tyr: Run Security and Quality Baseline", func() (interface{}, error) {
-		sastResult, _ := s.callTool(ctx, "sast_run", map[string]interface{}{"path": params.ProjectPath})
-		
-		if sastMap, ok := sastResult.(map[string]interface{}); ok {
-			if count, ok := sastMap["findings_count"].(int); ok && count > 0 {
-				s.callTool(ctx, "mem_save", map[string]interface{}{
-					"title": "Tyr Baseline: Security Findings",
-					"type":  "warning",
-					"what":  fmt.Sprintf("Found %d security issues during initial scan", count),
-					"where": params.ProjectPath,
+				teamResult, _ := s.callTool(ctx, "team_create", map[string]interface{}{
+					"name":         projectName + " Team",
+					"project_path": params.ProjectPath,
+					"agent_ids":    createdIDs,
 				})
-			}
-		}
-		return sastResult, nil
-	})
 
-	// 5. Hati: Planning and Assignment
-	var planID string
-	step("Hati: Generate Development Plan", func() (interface{}, error) {
-		stackInfo, archInfo := getStackInfoSafe(analysis)
-		return s.callTool(ctx, "plan_create", map[string]interface{}{
-			"title":       projectName + " Execution Plan",
-			"description": fmt.Sprintf("Auto-generated plan based on PRD and project scan (Stack: %s, Arch: %s)", stackInfo, archInfo),
-		})
-	})
-
-	planResult := results["Hati: Generate Development Plan"]
-	if planMap, ok := planResult.(map[string]interface{}); ok {
-		if id, ok := planMap["id"].(string); ok {
-			planID = id
+				agentIDs = createdIDs
+				return teamResult, nil
+			})
 		}
 	}
 
-	phaseTemplates := scanner.GeneratePhasesAndTasks(analysis)
+	// 4. Tyr: Initial Quality Scan
+	if !shouldBreak() {
+		step("Tyr: Run Security and Quality Baseline", func() (interface{}, error) {
+			sastResult, _ := s.callTool(ctx, "sast_run", map[string]interface{}{"path": params.ProjectPath})
+			return sastResult, nil
+		})
+	}
+
+	// 5. Hati: Planning and Assignment (Check if plan exists)
+	var planID string
+	if !shouldBreak() {
+		existingPlans, _ := s.callTool(ctx, "plan_list", map[string]interface{}{"status": "all"})
+		if pMap, ok := existingPlans.(map[string]interface{}); ok {
+			if plans, ok := pMap["plans"].([]interface{}); ok {
+				for _, p := range plans {
+					if pm, ok := p.(map[string]interface{}); ok {
+						if pm["title"] == projectName+" Execution Plan" {
+							planID, _ = pm["id"].(string)
+							log.Printf("   Plan already exists: %s", planID)
+							steps = append(steps, WorkflowStep{Name: "Hati: Generate Development Plan", Status: "success", Output: "Resumed from existing plan"})
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if planID == "" {
+			step("Hati: Generate Development Plan", func() (interface{}, error) {
+				stackInfo, archInfo := getStackInfoSafe(analysis)
+				return s.callTool(ctx, "plan_create", map[string]interface{}{
+					"title":       projectName + " Execution Plan",
+					"description": fmt.Sprintf("Auto-generated plan based on PRD and project scan (Stack: %s, Arch: %s)", stackInfo, archInfo),
+				})
+			})
+
+			planResult := results["Hati: Generate Development Plan"]
+			if planMap, ok := planResult.(map[string]interface{}); ok {
+				if id, ok := planMap["id"].(string); ok {
+					planID = id
+				}
+			}
+		}
+	}
+
+	// 6. Phases and Tasks creation (Only if plan was found/created)
 	taskCount := 0
 	assignmentCount := 0
-	for i, phaseTpl := range phaseTemplates {
-		phaseResult, pErr := s.callTool(ctx, "phase_create", map[string]interface{}{
-			"plan_id":   planID,
-			"title":     phaseTpl.Name,
-			"order_num": i,
-		})
-		
-		if pErr == nil {
-			if phaseMap, ok := phaseResult.(map[string]interface{}); ok {
-				if phaseID, ok := phaseMap["id"].(string); ok {
-					for _, taskTpl := range phaseTpl.Tasks {
-						taskCount++
-						taskResult, tErr := s.callTool(ctx, "task_create", map[string]interface{}{
-							"phase_id":    phaseID,
-							"title":       taskTpl.Title,
-							"description": taskTpl.Description,
-							"priority":    taskTpl.Priority,
-							"milestone":   taskTpl.Milestone,
-						})
+	if planID != "" && !shouldBreak() {
+		// Check if phases already exist to avoid duplication
+		existingPhases, _ := s.callTool(ctx, "plan_progress", map[string]interface{}{"plan_id": planID})
+		hasData := false
+		if epMap, ok := existingPhases.(map[string]interface{}); ok {
+			if count, ok := epMap["total_tasks"].(int); ok && count > 0 {
+				hasData = true
+				taskCount = count
+				log.Printf("   Plan already has %d tasks, skipping creation.", count)
+			}
+		}
 
-						if tErr == nil {
-							if tMap, ok := taskResult.(map[string]interface{}); ok {
-								if taskID, ok := tMap["id"].(string); ok {
-									// ASIGNACIÓN AUTOMÁTICA
-									taskAgentIDs := []string{}
-									for _, tType := range taskTpl.AgentTypes {
-										if aID, ok := typeToAgentID[tType]; ok {
-											taskAgentIDs = append(taskAgentIDs, aID)
+		if !hasData {
+			phaseTemplates := scanner.GeneratePhasesAndTasks(analysis)
+			for i, phaseTpl := range phaseTemplates {
+				if shouldBreak() { break }
+				phaseResult, pErr := s.callTool(ctx, "phase_create", map[string]interface{}{
+					"plan_id":   planID,
+					"title":     phaseTpl.Name,
+					"order_num": i,
+				})
+				
+				if pErr == nil {
+					if phaseMap, ok := phaseResult.(map[string]interface{}); ok {
+						if phaseID, ok := phaseMap["id"].(string); ok {
+							for _, taskTpl := range phaseTpl.Tasks {
+								taskCount++
+								taskResult, tErr := s.callTool(ctx, "task_create", map[string]interface{}{
+									"phase_id":    phaseID,
+									"title":       taskTpl.Title,
+									"description": taskTpl.Description,
+									"priority":    taskTpl.Priority,
+									"milestone":   taskTpl.Milestone,
+								})
+
+								if tErr == nil {
+									if tMap, ok := taskResult.(map[string]interface{}); ok {
+										if taskID, ok := tMap["id"].(string); ok {
+											// ASIGNACIÓN AUTOMÁTICA
+											taskAgentIDs := []string{}
+											for _, tType := range taskTpl.AgentTypes {
+												if aID, ok := typeToAgentID[tType]; ok {
+													taskAgentIDs = append(taskAgentIDs, aID)
+												}
+											}
+											if len(taskAgentIDs) > 0 {
+												s.callTool(ctx, "task_assign_agents", map[string]interface{}{
+													"task_id":   taskID,
+													"agent_ids": taskAgentIDs,
+												})
+												assignmentCount++
+											}
 										}
-									}
-									if len(taskAgentIDs) > 0 {
-										s.callTool(ctx, "task_assign_agents", map[string]interface{}{
-											"task_id":   taskID,
-											"agent_ids": taskAgentIDs,
-										})
-										assignmentCount++
 									}
 								}
 							}
@@ -1342,20 +1419,29 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 		}
 	}
 
-	// 6. Final Monitoring and Approval
-	reviewQuestion := fmt.Sprintf("¿Deseas iniciar el desarrollo para '%s'? Se han creado %d agentes y %d tareas asignadas.", projectName, len(agentIDs), taskCount)
-	step("Hati: Create Initial Review", func() (interface{}, error) {
-		return s.callTool(ctx, "human_review_create", map[string]interface{}{
-			"review_type": "project_start",
-			"entity_type": "plan",
-			"entity_id":   planID,
-			"question":    reviewQuestion,
+	// 7. Final Monitoring and Approval
+	if planID != "" && !shouldBreak() {
+		reviewQuestion := fmt.Sprintf("¿Deseas iniciar el desarrollo para '%s'? Se han creado %d agentes y %d tareas asignadas.", projectName, len(agentIDs), taskCount)
+		step("Hati: Create Initial Review", func() (interface{}, error) {
+			return s.callTool(ctx, "human_review_create", map[string]interface{}{
+				"review_type": "project_start",
+				"entity_type": "plan",
+				"entity_id":   planID,
+				"question":    reviewQuestion,
+			})
 		})
-	})
+	}
+
+	status := "completed"
+	msg := "Integrated lifecycle complete. System is ready and waiting for human approval to start execution."
+	if shouldBreak() {
+		status = "partial"
+		msg = "Workflow paused to avoid IDE timeout. Please call this tool again to resume from where it left off. State has been preserved."
+	}
 
 	response := map[string]interface{}{
 		"workflow":        "project_lifecycle",
-		"status":          "completed",
+		"status":          status,
 		"project_name":    projectName,
 		"plan_id":         planID,
 		"prd_id":          prdID,
@@ -1364,10 +1450,11 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 		"assignments":     assignmentCount,
 		"steps":           steps,
 		"auto_start":      params.AutoStart,
-		"message":         "Integrated lifecycle complete. System is ready and waiting for human approval to start execution.",
+		"message":         msg,
+		"elapsed_time":    time.Since(startTime).String(),
 	}
 
-	if params.AutoStart && planID != "" {
+	if params.AutoStart && planID != "" && status == "completed" {
 		response["next_step"] = "rag continue --plan " + planID
 	}
 

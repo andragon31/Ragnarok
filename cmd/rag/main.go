@@ -24,7 +24,7 @@ import (
 	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
-var version = "2.2.9"
+var version = "2.3.0"
 
 type Plugin struct {
 	Name    string
