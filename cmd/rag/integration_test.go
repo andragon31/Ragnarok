@@ -23,7 +23,7 @@ func TestExportImportFlow(t *testing.T) {
 	}
 
 	exportData := make(map[string]interface{})
-	exportData["version"] = "2.2.2"
+	exportData["version"] = version
 	exportData["exported_at"] = "2026-03-28T00:00:00Z"
 	exportData["plugins"] = make(map[string]interface{})
 
@@ -66,8 +66,8 @@ func TestExportImportFlow(t *testing.T) {
 		t.Fatalf("Failed to parse export file: %v", err)
 	}
 
-	if parsedData["version"] != "2.2.2" {
-		t.Errorf("Export version = %v, want %v", parsedData["version"], "2.2.2")
+	if parsedData["version"] != version {
+		t.Errorf("Export version = %v, want %v", parsedData["version"], version)
 	}
 
 	pluginsData, ok := parsedData["plugins"].(map[string]interface{})
@@ -170,8 +170,8 @@ func TestExportDataStructure(t *testing.T) {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}
 
-	if parsed["version"] != "2.2.2" {
-		t.Errorf("version = %v, want %v", parsed["version"], "2.2.2")
+	if parsed["version"] != version {
+		t.Errorf("version = %v, want %v", parsed["version"], version)
 	}
 
 	plugins := parsed["plugins"].(map[string]interface{})
