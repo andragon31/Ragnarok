@@ -201,6 +201,7 @@ func (s *Server) registerHandlers(dataDir string) error {
 	}
 
 	s.registerWorkflowHandlers()
+	s.registerHelpHandlers()
 
 	if len(errs) > 0 {
 		return fmt.Errorf("plugin initialization errors: %v", errs)
@@ -249,6 +250,11 @@ func (s *Server) registerWorkflowHandlers() {
 			schema: `{"type":"object","properties":{"goal":{"type":"string"},"module":{"type":"string"},"project_path":{"type":"string"}},"required":["goal"]}`,
 			fn:     s.handleWorkflowSessionStart,
 		},
+		"workflow_project_lifecycle": {
+			desc:   "Initialize full project lifecycle: scan + PRD + design + plan + agents + quality (Recommended)",
+			schema: `{"type":"object","properties":{"project_path":{"type":"string"},"prd_file":{"type":"string"},"title":{"type":"string"},"auto_start":{"type":"boolean"}},"required":["project_path"]}`,
+			fn:     s.handleWorkflowProjectLifecycle,
+		},
 		"workflow_checkpoint_create": {
 			desc:   "Create quality checkpoint with human approval",
 			schema: `{"type":"object","properties":{"plan_id":{"type":"string"},"phase_id":{"type":"string"},"description":{"type":"string"}},"required":["plan_id","description"]}`,
@@ -258,11 +264,6 @@ func (s *Server) registerWorkflowHandlers() {
 			desc:   "Run ecosystem health diagnostics",
 			schema: `{"type":"object","properties":{"verbose":{"type":"boolean","description":"Show detailed diagnostics"}}}`,
 			fn:     s.handleEcosystemDiagnose,
-		},
-		"workflow_project_lifecycle": {
-			desc:   "Execute full project lifecycle: analyze, plan, assign agents, validate (Recommended for agents)",
-			schema: `{"type":"object","properties":{"project_path":{"type":"string","description":"Project directory path"},"prd_file":{"type":"string","description":"PRD file path (optional)"},"title":{"type":"string","description":"Project title (optional)"},"requirements":{"type":"array","items":{"type":"string"},"description":"Requirements array (optional)"},"auto_start":{"type":"boolean","description":"Auto-start development after planning"}},"required":["project_path"]}`,
-			fn:     s.handleWorkflowProjectLifecycle,
 		},
 	}
 
@@ -641,10 +642,8 @@ func (s *Server) Run(ctx context.Context) error {
 			case "tools/call":
 				resp = s.handleToolsCall(ctx, raw, baseReq.ID)
 			// A-3 fix: silently ignore standard MCP notifications (no response required)
-			case "notifications/initialized",
-				"notifications/cancelled",
-				"notifications/progress",
-				"initialized":
+			case "notifications/initialized", "initialized", "notifications/cancelled", "notifications/progress":
+				log.Printf("MCP Notification received: %s (ignoring)", baseReq.Method)
 				continue
 			default:
 				handler, ok := s.handlers[baseReq.Method]
