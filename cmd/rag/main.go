@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +25,28 @@ import (
 	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
-var version = "2.3.1"
+var version = "2.3.4"
+
+func toInt(v interface{}) int {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case int:
+		return val
+	case float64:
+		return int(val)
+	case int32:
+		return int(val)
+	case int64:
+		return int(val)
+	case string:
+		i, _ := strconv.Atoi(val)
+		return i
+	default:
+		return 0
+	}
+}
 
 type Plugin struct {
 	Name    string
@@ -1348,19 +1370,19 @@ func runBootstrap(prdFile, projectPath string) {
 		os.Exit(1)
 	}
 
-	status := resMap["status"].(string)
-	projectName := resMap["project_name"].(string)
-	planID := resMap["plan_id"].(string)
-	agentCount := resMap["agent_count"].(float64)
-	taskCount := resMap["task_count"].(float64)
+	status, _ := resMap["status"].(string)
+	projectName, _ := resMap["project_name"].(string)
+	planID, _ := resMap["plan_id"].(string)
+	agentCount := toInt(resMap["agent_count"])
+	taskCount := toInt(resMap["task_count"])
 
 	if status == "partial" {
 		fmt.Printf("\n⚠️ Workflow paused due to complexity. Please run the command again to finish.\n")
 	}
 
 	fmt.Printf("\n✅ Bootstrap Successful for project '%s'!\n", projectName)
-	fmt.Printf("   ├─ Agents created: %d\n", int(agentCount))
-	fmt.Printf("   ├─ Tasks planned: %d\n", int(taskCount))
+	fmt.Printf("   ├─ Agents created: %d\n", agentCount)
+	fmt.Printf("   ├─ Tasks planned: %d\n", taskCount)
 	fmt.Printf("   └─ Plan ID:       %s\n", planID)
 
 	fmt.Println("\n📋 Next steps:")
