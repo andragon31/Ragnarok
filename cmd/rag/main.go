@@ -24,7 +24,7 @@ import (
 	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
-var version = "2.3.0"
+var version = "2.3.1"
 
 type Plugin struct {
 	Name    string
@@ -89,6 +89,10 @@ func main() {
 
 	mcpCmd := flag.NewFlagSet("mcp", flag.ExitOnError)
 	mcpDir := mcpCmd.String("dir", "", "Base directory for plugins (default: ~)")
+	
+	bootstrapCmd := flag.NewFlagSet("bootstrap", flag.ExitOnError)
+	bootstrapPRD := bootstrapCmd.String("prd", "", "PRD file path (required)")
+	bootstrapPath := bootstrapCmd.String("path", ".", "Project base path")
 
 	newCmd := flag.NewFlagSet("new", flag.ExitOnError)
 	newProject := newCmd.String("project", "", "Project name")
@@ -196,6 +200,13 @@ func main() {
 	case "mcp":
 		mcpCmd.Parse(os.Args[2:])
 		runUnifiedMCP(*mcpDir)
+	case "bootstrap":
+		bootstrapCmd.Parse(os.Args[2:])
+		if *bootstrapPRD == "" && len(os.Args) > 2 {
+			// Direct usage: rag bootstrap PRD.md
+			*bootstrapPRD = os.Args[2]
+		}
+		runBootstrap(*bootstrapPRD, *bootstrapPath)
 	case "setup":
 		agent := ""
 		if len(os.Args) > 2 {
@@ -1290,14 +1301,23 @@ func runStatus(planID string) {
 	fmt.Println("\n✓ Status check complete")
 }
 
-func runProject(projectPath, prdFile, title, stack string) {
-	if projectPath == "" {
-		fmt.Println("Error: --path is required")
-		fmt.Println("Example: rag project --path ./mi-proyecto --prd ./PRD.md")
+func runBootstrap(prdFile, projectPath string) {
+	if prdFile == "" {
+		fmt.Println("Error: --prd is required")
+		fmt.Println("Example: rag bootstrap --prd ./PRD.md [--path .]")
 		os.Exit(1)
 	}
 
+	absPRD, _ := filepath.Abs(prdFile)
+	if projectPath == "." || projectPath == "" {
+		projectPath = filepath.Dir(absPRD)
+	}
 	absPath, _ := filepath.Abs(projectPath)
+
+	fmt.Printf("\n🚀 Ragnarok Bootstrap - Project Initialization\n")
+	fmt.Printf("   PRD:  %s\n", absPRD)
+	fmt.Printf("   Path: %s\n", absPath)
+	fmt.Println(strings.Repeat("─", 50))
 
 	srv, err := unified.NewServer("")
 	if err != nil {
@@ -1306,79 +1326,78 @@ func runProject(projectPath, prdFile, title, stack string) {
 	}
 
 	ctx := context.Background()
+	
+	fmt.Println("⏳ Executing Integrated Lifecycle (Fenrir -> Skoll -> Tyr -> Hati)...")
+	fmt.Println("   Note: This can take 1-2 minutes for large projects. Handled safely.")
 
-	if prdFile != "" {
-		fmt.Printf("Ragnarok Project - Initializing from PRD\n")
-		fmt.Printf("Project: %s\n", absPath)
-		fmt.Printf("PRD: %s\n", prdFile)
-		fmt.Println(strings.Repeat("─", 50))
+	result, err := srv.ExecuteWorkflow(ctx, "workflow_project_lifecycle", map[string]interface{}{
+		"prd_file":     absPRD,
+		"project_path": absPath,
+		"auto_start":   false,
+	})
 
-		result, err := srv.ExecuteWorkflow(ctx, "workflow_prd_analyze", map[string]interface{}{
-			"prd_file":     prdFile,
-			"project_path": absPath,
-			"plan_title":   title,
-		})
-
-		if err != nil {
-			fmt.Printf("Error analyzing PRD: %v\n", err)
-			os.Exit(1)
-		}
-
-		planID := getPlanID(result)
-		if planID == "" {
-			planID = getStringResult(result, "id")
-		}
-
-		fmt.Println("\n✓ PRD analyzed and plan created!")
-		fmt.Printf("Plan ID: %s\n", planID)
-		fmt.Println("\n📋 Next steps:")
-		fmt.Println("  rag project --path " + absPath + "  # Continue with this project")
-		fmt.Printf("  rag continue --plan %s  # Start development\n", planID)
-	} else {
-		fmt.Printf("Ragnarok Project - Existing project\n")
-		fmt.Printf("Project: %s\n", absPath)
-		fmt.Println(strings.Repeat("─", 50))
-
-		fmt.Println("\n🔍 Analyzing existing project...")
-
-		result, err := srv.ExecuteWorkflow(ctx, "project_scan", map[string]interface{}{
-			"path": absPath,
-		})
-
-		if err != nil {
-			fmt.Printf("Error scanning project: %v\n", err)
-			os.Exit(1)
-		}
-
-		projectName := title
-		if projectName == "" {
-			projectName = getStringResult(result, "name")
-			if projectName == "" {
-				projectName = filepath.Base(absPath)
-			}
-		}
-
-		detectedStack := getStringResult(result, "stack")
-		architecture := getStringResult(result, "architecture")
-
-		memResult, _ := srv.ExecuteWorkflow(ctx, "mem_save", map[string]interface{}{
-			"title": "Project: " + projectName,
-			"type":  "decision",
-			"what":  "Project analyzed: " + absPath,
-			"why":   "To understand existing codebase before making changes",
-			"where": absPath,
-		})
-		_ = memResult
-
-		fmt.Println("\n✓ Project analyzed!")
-		fmt.Printf("  Name: %s\n", projectName)
-		fmt.Printf("  Stack: %s\n", detectedStack)
-		fmt.Printf("  Architecture: %s\n", architecture)
-		fmt.Println("\n📋 Options:")
-		fmt.Println("  rag requirement add --project " + absPath + "  # Add requirements")
-		fmt.Println("  rag plan create --project " + absPath + "  # Create plan from requirements")
-		fmt.Println("  rag continue --plan <plan_id>  # Resume development")
+	if err != nil {
+		fmt.Printf("\n❌ Error during bootstrap: %v\n", err)
+		os.Exit(1)
 	}
+
+	// Format result
+	resMap, ok := result.(map[string]interface{})
+	if !ok {
+		fmt.Printf("\n❌ Unexpected result format: %v\n", result)
+		os.Exit(1)
+	}
+
+	status := resMap["status"].(string)
+	projectName := resMap["project_name"].(string)
+	planID := resMap["plan_id"].(string)
+	agentCount := resMap["agent_count"].(float64)
+	taskCount := resMap["task_count"].(float64)
+
+	if status == "partial" {
+		fmt.Printf("\n⚠️ Workflow paused due to complexity. Please run the command again to finish.\n")
+	}
+
+	fmt.Printf("\n✅ Bootstrap Successful for project '%s'!\n", projectName)
+	fmt.Printf("   ├─ Agents created: %d\n", int(agentCount))
+	fmt.Printf("   ├─ Tasks planned: %d\n", int(taskCount))
+	fmt.Printf("   └─ Plan ID:       %s\n", planID)
+
+	fmt.Println("\n📋 Next steps:")
+	fmt.Printf("   rag continue --plan %s     # Start working on tasks\n", planID)
+	fmt.Printf("   rag status --plan %s       # View current progress\n\n", planID)
+}
+
+func runProject(projectPath, prdFile, title, stack string) {
+	if prdFile != "" {
+		runBootstrap(prdFile, projectPath)
+		return
+	}
+
+	if projectPath == "" {
+		fmt.Println("Error: --path is required")
+		os.Exit(1)
+	}
+
+	absPath, _ := filepath.Abs(projectPath)
+	srv, err := unified.NewServer("")
+	if err != nil {
+		fmt.Printf("Error initializing server: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+	fmt.Printf("Ragnarok Project - Syncing: %s\n", absPath)
+
+	result, err := srv.ExecuteWorkflow(ctx, "project_scan", map[string]interface{}{
+		"path": absPath,
+	})
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✓ Scan complete: %s\n", getStringResult(result, "stack"))
 }
 
 func runRequirement(projectPath, text string, priority int) {
