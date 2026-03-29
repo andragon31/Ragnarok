@@ -987,14 +987,14 @@ func setupOpenCode() {
 		sub  string
 		file string
 	}{
-		{os.Getenv("USERPROFILE"), ".config/opencode", "opencode.json"},
-		{os.Getenv("APPDATA"), "opencode", "opencode.json"},
-		{os.Getenv("APPDATA"), "OpenCode", "opencode.json"},
-		{os.Getenv("LOCALAPPDATA"), "opencode", "opencode.json"},
+		{os.Getenv("USERPROFILE"), ".config/opencode", ".mcp.json"},
+		{os.Getenv("APPDATA"), "opencode", ".mcp.json"},
+		{os.Getenv("APPDATA"), "OpenCode", ".mcp.json"},
+		{os.Getenv("LOCALAPPDATA"), "opencode", ".mcp.json"},
 	}
 
 	mcpConfig := map[string]interface{}{
-		"mcp": map[string]interface{}{
+		"mcpServers": map[string]interface{}{
 			"ragnarok": map[string]interface{}{
 				"type":    "local",
 				"command": []string{ragPath, "mcp"},
@@ -1019,8 +1019,8 @@ func setupOpenCode() {
 		}
 
 		if existingConfig != nil {
-			if mcp, ok := existingConfig["mcp"].(map[string]interface{}); ok {
-				mcp["ragnarok"] = mcpConfig["mcp"].(map[string]interface{})["ragnarok"]
+			if mcpServers, ok := existingConfig["mcpServers"].(map[string]interface{}); ok {
+				mcpServers["ragnarok"] = mcpConfig["mcpServers"].(map[string]interface{})["ragnarok"]
 				mcpConfig = existingConfig
 			}
 		}
