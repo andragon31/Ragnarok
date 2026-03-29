@@ -819,6 +819,7 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 	}
 
 	requirementsQuery := `SELECT id, req_type, priority, title, description FROM prd_requirements WHERE prd_id = ?`
+	log.Printf("[DEBUG] plan_create_from_prd: querying requirements with prdID=%s", params.PRDID)
 	rows, err := s.db.Query(requirementsQuery, params.PRDID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get requirements: %w", err)
@@ -844,6 +845,10 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating requirements: %w", err)
+	}
+	log.Printf("[DEBUG] plan_create_from_prd: found %d requirements", len(requirements))
+	for i, r := range requirements {
+		log.Printf("[DEBUG] requirement[%d]: id=%s, title=%s", i, r.ID, r.Title)
 	}
 
 	type taskInfo struct {
@@ -912,6 +917,7 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 	}
 
 	taskIDs := []string{}
+	log.Printf("[DEBUG] plan_create_from_prd: creating %d tasks", len(tasksToCreate))
 	for _, t := range tasksToCreate {
 		taskID := generateID("task")
 		taskQuery := `INSERT INTO tasks (id, phase_id, title, status, priority, created_at, updated_at)
@@ -926,6 +932,7 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 			return nil, fmt.Errorf("failed to create task: %w", err)
 		}
 		taskIDs = append(taskIDs, taskID)
+		log.Printf("[DEBUG] created task: id=%s, title=%s, phaseIndex=%d", taskID, t.Title, t.PhaseIndex)
 	}
 
 	return &Response{Result: map[string]interface{}{
@@ -1043,19 +1050,16 @@ func (s *Server) extractPhasesFromPRD(prdID string) []string {
 func (s *Server) extractRequirements(content string, prdID string) ([]map[string]string, error) {
 	requirements := []map[string]string{}
 
-	reStructured := regexp.MustCompile(`(?m)^[-*]\s+(?:\[([A-Z]+-?\d*)\]\s*[:.-]?\s*)?(.+)`)
-	matchesStructured := reStructured.FindAllStringSubmatch(content, -1)
+	reWithBracket := regexp.MustCompile(`(?m)^[-*]\s+\[([^\]]+)\]\s*[:.-]?\s*(.+)`)
+	reWithoutBracket := regexp.MustCompile(`(?m)^[-*]\s+(.+)`)
 
-	for i, match := range matchesStructured {
-		reqID := fmt.Sprintf("REQ-%03d", i+1)
-		if len(match) > 1 && match[1] != "" {
-			reqID = match[1]
-		}
-		title := strings.TrimSpace(match[len(match)-1])
+	matchesWithBracket := reWithBracket.FindAllStringSubmatch(content, -1)
+	for _, match := range matchesWithBracket {
+		reqID := match[1]
+		title := strings.TrimSpace(match[2])
 		if title == "" {
 			continue
 		}
-
 		reqType := "functional"
 		lowerTitle := strings.ToLower(title)
 		if strings.Contains(lowerTitle, "performance") ||
@@ -1066,13 +1070,39 @@ func (s *Server) extractRequirements(content string, prdID string) ([]map[string
 			strings.Contains(lowerTitle, "owasp") {
 			reqType = "non-functional"
 		}
-
 		requirements = append(requirements, map[string]string{
 			"id":    reqID,
 			"type":  reqType,
 			"title": title,
 		})
+		reqQuery := `INSERT INTO prd_requirements (id, prd_id, req_type, priority, title, status) VALUES (?, ?, ?, 'medium', ?, 'pending')`
+		_, err := s.db.Exec(reqQuery, generateID("req"), prdID, reqType, title)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert requirement: %w", err)
+		}
+	}
 
+	for i, match := range reWithoutBracket.FindAllStringSubmatch(content, -1) {
+		title := strings.TrimSpace(match[1])
+		if title == "" {
+			continue
+		}
+		reqID := fmt.Sprintf("REQ-%03d", i+1)
+		reqType := "functional"
+		lowerTitle := strings.ToLower(title)
+		if strings.Contains(lowerTitle, "performance") ||
+			strings.Contains(lowerTitle, "security") ||
+			strings.Contains(lowerTitle, "scalability") ||
+			strings.Contains(lowerTitle, "compliance") ||
+			strings.Contains(lowerTitle, "rate limit") ||
+			strings.Contains(lowerTitle, "owasp") {
+			reqType = "non-functional"
+		}
+		requirements = append(requirements, map[string]string{
+			"id":    reqID,
+			"type":  reqType,
+			"title": title,
+		})
 		reqQuery := `INSERT INTO prd_requirements (id, prd_id, req_type, priority, title, status) VALUES (?, ?, ?, 'medium', ?, 'pending')`
 		_, err := s.db.Exec(reqQuery, generateID("req"), prdID, reqType, title)
 		if err != nil {
