@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -217,7 +218,7 @@ func (s *Server) handleTaskGetNext(ctx context.Context, req *Request) (*Response
 
 	query := `SELECT t.id, t.phase_id, t.prd_requirement_id, t.title, t.description, t.status, t.priority, 
 			  t.assigned_agent_ids, t.assigned_agent_type, t.estimated_hours, t.actual_hours, t.notes, 
-			  t.blocker, t.milestone, t.subtasks, t.completed_at, t.created_at, t.updated_at, p.title as phase_title
+			  t.blocker, t.milestone, t.subtasks, t.completed_at, t.created_at, t.updated_at, p.name as phase_title
 			  FROM tasks t
 			  JOIN phases p ON t.phase_id = p.id
 			  WHERE p.plan_id = ? AND t.status IN ('pending', 'blocked')
@@ -238,12 +239,15 @@ func (s *Server) handleTaskGetNext(ctx context.Context, req *Request) (*Response
 		&subtasks, &completedAt, &task.CreatedAt, &task.UpdatedAt, &phaseTitle,
 	)
 	if err != nil {
-		return &Response{
-			Result: map[string]interface{}{
-				"message":      "no pending tasks",
-				"all_complete": true,
-			},
-		}, nil
+		if err == sql.ErrNoRows {
+			return &Response{
+				Result: map[string]interface{}{
+					"message":      "no pending tasks",
+					"all_complete": true,
+				},
+			}, nil
+		}
+		return nil, fmt.Errorf("failed to get next task: %w", err)
 	}
 
 	task.PRDRequirementID = prdReqID.String
@@ -401,13 +405,13 @@ func (s *Server) handleTaskList(ctx context.Context, req *Request) (*Response, e
 
 	tasks := []map[string]interface{}{}
 	for rows.Next() {
-		var id, phaseID, prdReqID, title, agentIDsJSON, agentType, blocker sql.NullString
-		var status string
-		var priority, milestone int
+		var id, phaseID, prdReqID, title, description, status, priority, agentIDsJSON, agentType, blocker sql.NullString
+		var milestone int
 		var completedAt sql.NullTime
 		var createdAt time.Time
 
-		if err := rows.Scan(&id, &phaseID, &prdReqID, &title, &status, &priority, &agentIDsJSON, &agentType, &milestone, &blocker, &completedAt, &createdAt); err != nil {
+		if err := rows.Scan(&id, &phaseID, &prdReqID, &title, &description, &status, &priority, &agentIDsJSON, &agentType, &milestone, &blocker, &completedAt, &createdAt); err != nil {
+			log.Printf("Error scanning task: %v", err)
 			continue
 		}
 
