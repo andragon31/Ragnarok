@@ -69,7 +69,7 @@ func NewServer(dataDir string) (*Server, error) {
 		handlers:      make(map[string]mcp.ToolHandler),
 		tools:         []Tool{},
 		serverName:    "ragnarok",
-		serverVersion: "2.2.6",
+		serverVersion: "2.2.7",
 		dbPaths:       make(map[string]string),
 	}
 
@@ -611,67 +611,78 @@ func (s *Server) Run(ctx context.Context) error {
 				continue
 			}
 
-			var baseReq struct {
-				Method string      `json:"method"`
-				ID     interface{} `json:"id"`
-			}
-			if err := json.Unmarshal(raw, &baseReq); err != nil {
-				continue
-			}
-
-			var resp interface{}
-			switch baseReq.Method {
-			case "initialize":
-				resp = s.handleInitialize(baseReq.ID)
-			case "tools/list":
-				resp = s.handleToolsList(baseReq.ID)
-			case "tools/call":
-				resp = s.handleToolsCall(ctx, raw, baseReq.ID)
-			// A-3 fix: silently ignore standard MCP notifications (no response required)
-			case "notifications/initialized", "initialized", "notifications/cancelled", "notifications/progress":
-				log.Printf("MCP Notification received: %s (ignoring)", baseReq.Method)
-				continue
-			default:
-				handler, ok := s.handlers[baseReq.Method]
-				if !ok {
-					resp = map[string]interface{}{
-						"jsonrpc": "2.0",
-						"id":      baseReq.ID,
-						"error":   map[string]string{"code": "-32601", "message": "Method not found: " + baseReq.Method},
+			// Wrap each request in a function to handle panics and defer resource cleanup
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("CRITICAL: Recovered from panic in request handling: %v", r)
+						// We can't easily send an error response here because we might not have the ID
+						// but at least the server stays alive.
 					}
-				} else {
-					var req mcp.Request
-					if err := json.Unmarshal(raw, &req); err != nil {
+				}()
+
+				var baseReq struct {
+					Method string      `json:"method"`
+					ID     interface{} `json:"id"`
+				}
+				if err := json.Unmarshal(raw, &baseReq); err != nil {
+					return
+				}
+
+				var resp interface{}
+				switch baseReq.Method {
+				case "initialize":
+					resp = s.handleInitialize(baseReq.ID)
+				case "tools/list":
+					resp = s.handleToolsList(baseReq.ID)
+				case "tools/call":
+					resp = s.handleToolsCall(ctx, raw, baseReq.ID)
+				case "notifications/initialized", "initialized", "notifications/cancelled", "notifications/progress":
+					log.Printf("MCP Notification received: %s (ignoring)", baseReq.Method)
+					return
+				default:
+					handler, ok := s.handlers[baseReq.Method]
+					if !ok {
 						resp = map[string]interface{}{
 							"jsonrpc": "2.0",
 							"id":      baseReq.ID,
-							"error":   map[string]string{"code": "-32700", "message": "Parse error: " + err.Error()},
+							"error":   map[string]string{"code": "-32601", "message": "Method not found: " + baseReq.Method},
 						}
 					} else {
-						handlerCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-						defer cancel()
-						result, err := handler(handlerCtx, &req)
-						if err != nil {
-							log.Printf("Handler error for %s: %v", baseReq.Method, err)
+						var req mcp.Request
+						if err := json.Unmarshal(raw, &req); err != nil {
 							resp = map[string]interface{}{
 								"jsonrpc": "2.0",
 								"id":      baseReq.ID,
-								"error":   map[string]string{"code": "-32603", "message": "Internal error: " + err.Error()},
+								"error":   map[string]string{"code": "-32700", "message": "Parse error: " + err.Error()},
 							}
 						} else {
-							resp = map[string]interface{}{
-								"jsonrpc": "2.0",
-								"id":      baseReq.ID,
-								"result":  result,
+							// Use a timeout for handlers to prevent blocking the pipe indefinitely
+							handlerCtx, cancel := context.WithTimeout(ctx, 300*time.Second) // Increased to 5 min for workflows
+							defer cancel()
+							result, err := handler(handlerCtx, &req)
+							if err != nil {
+								log.Printf("Handler error for %s: %v", baseReq.Method, err)
+								resp = map[string]interface{}{
+									"jsonrpc": "2.0",
+									"id":      baseReq.ID,
+									"error":   map[string]string{"code": "-32603", "message": "Internal error: " + err.Error()},
+								}
+							} else {
+								resp = map[string]interface{}{
+									"jsonrpc": "2.0",
+									"id":      baseReq.ID,
+									"result":  result,
+								}
 							}
 						}
 					}
 				}
-			}
 
-			if resp != nil {
-				encoder.Encode(resp)
-			}
+				if resp != nil {
+					encoder.Encode(resp)
+				}
+			}()
 		}
 	}
 }

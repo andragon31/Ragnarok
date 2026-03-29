@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -1163,8 +1164,8 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 		results[name] = out
 	}
 
-	fmt.Printf("🔄 Project Lifecycle: Starting integrated full cycle\n")
-	fmt.Printf("   Project: %s\n", params.ProjectPath)
+	log.Printf("🔄 Project Lifecycle: Starting integrated full cycle")
+	log.Printf("   Project: %s", params.ProjectPath)
 
 	// 1. Fenrir: Analysis
 	step("Fenrir: Analyze Project Context", func() (interface{}, error) {
