@@ -867,7 +867,6 @@ func setupOpenCode() {
 	configDirs := []string{
 		filepath.Join(os.Getenv("APPDATA"), "opencode"),
 		filepath.Join(os.Getenv("LOCALAPPDATA"), "opencode"),
-		filepath.Join(os.Getenv("USERPROFILE"), ".config", "opencode"),
 	}
 
 	configDir := ""
@@ -879,12 +878,12 @@ func setupOpenCode() {
 	}
 
 	if configDir == "" {
-		configDir = filepath.Join(os.Getenv("USERPROFILE"), ".config", "opencode")
+		configDir = filepath.Join(os.Getenv("USERPROFILE"), ".opencode")
 		os.MkdirAll(configDir, 0755)
 	}
 
 	mcpConfig := map[string]interface{}{
-		"mcp": map[string]interface{}{
+		"mcpServers": map[string]interface{}{
 			"ragnarok": map[string]interface{}{
 				"type":    "local",
 				"command": []string{ragPath, "mcp"},
@@ -893,15 +892,15 @@ func setupOpenCode() {
 		},
 	}
 
-	configPath := filepath.Join(configDir, "opencode.json")
+	configPath := filepath.Join(configDir, ".mcp.json")
 	var existingConfig map[string]interface{}
 	if data, err := os.ReadFile(configPath); err == nil {
 		json.Unmarshal(data, &existingConfig)
 	}
 
 	if existingConfig != nil {
-		if mcpServers, ok := existingConfig["mcp"].(map[string]interface{}); ok {
-			mcpServers["ragnarok"] = mcpConfig["mcp"].(map[string]interface{})["ragnarok"]
+		if mcpServers, ok := existingConfig["mcpServers"].(map[string]interface{}); ok {
+			mcpServers["ragnarok"] = mcpConfig["mcpServers"].(map[string]interface{})["ragnarok"]
 			mcpConfig = existingConfig
 		}
 	}
