@@ -378,9 +378,9 @@ func (s *Server) handleTaskList(ctx context.Context, req *Request) (*Response, e
 		args = append(args, params.PhaseID)
 	}
 	if params.PlanID != "" {
-		conditions = append(conditions, "p.id = ?")
+		conditions = append(conditions, "ph.plan_id = ?")
 		args = append(args, params.PlanID)
-		query += " JOIN phases ph ON t.phase_id = ph.id JOIN plans p ON ph.plan_id = p.id"
+		query += " JOIN phases ph ON t.phase_id = ph.id"
 	}
 	if params.Status != "" {
 		conditions = append(conditions, "t.status = ?")
@@ -408,11 +408,16 @@ func (s *Server) handleTaskList(ctx context.Context, req *Request) (*Response, e
 		var id, phaseID, prdReqID, title, description, status, priority, agentIDsJSON, agentType, blocker sql.NullString
 		var milestone int
 		var completedAt sql.NullTime
-		var createdAt time.Time
+		var createdAtStr sql.NullString
 
-		if err := rows.Scan(&id, &phaseID, &prdReqID, &title, &description, &status, &priority, &agentIDsJSON, &agentType, &milestone, &blocker, &completedAt, &createdAt); err != nil {
-			log.Printf("Error scanning task: %v", err)
+		if err := rows.Scan(&id, &phaseID, &prdReqID, &title, &description, &status, &priority, &agentIDsJSON, &agentType, &milestone, &blocker, &completedAt, &createdAtStr); err != nil {
+			log.Printf("Error scanning task in task_list: %v", err)
 			continue
+		}
+
+		createdAt, _ := time.Parse(time.RFC3339, createdAtStr.String)
+		if createdAt.IsZero() {
+			createdAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr.String)
 		}
 
 		var agentIDs []string
@@ -421,17 +426,18 @@ func (s *Server) handleTaskList(ctx context.Context, req *Request) (*Response, e
 		}
 
 		task := map[string]interface{}{
-			"id":         id.String,
-			"phase_id":   phaseID.String,
-			"prd_req_id": prdReqID.String,
-			"title":      title.String,
-			"status":     status.String,
-			"priority":   priority.String,
-			"agent_ids":  agentIDs,
-			"agent_type": agentType.String,
-			"milestone":  milestone == 1,
-			"blocker":    blocker.String,
-			"created_at": createdAt,
+			"id":          id.String,
+			"phase_id":    phaseID.String,
+			"prd_req_id":  prdReqID.String,
+			"title":       title.String,
+			"description": description.String,
+			"status":      status.String,
+			"priority":    priority.String,
+			"agent_ids":   agentIDs,
+			"agent_type":  agentType.String,
+			"milestone":   milestone == 1,
+			"blocker":     blocker.String,
+			"created_at":  createdAt.Format(time.RFC3339),
 		}
 		if completedAt.Valid {
 			task["completed_at"] = completedAt.Time
@@ -477,6 +483,7 @@ func (s *Server) handlePhaseCreate(ctx context.Context, req *Request) (*Response
 
 	return &Response{Result: map[string]interface{}{
 		"id":         phaseID,
+		"phase_id":   phaseID,
 		"plan_id":    params.PlanID,
 		"title":      params.Title,
 		"status":     "pending",
@@ -502,6 +509,7 @@ func (s *Server) handlePhaseUpdate(ctx context.Context, req *Request) (*Response
 	}
 
 	return &Response{Result: map[string]interface{}{
+		"id":         params.PhaseID,
 		"phase_id":   params.PhaseID,
 		"status":     params.Status,
 		"updated_at": now,
@@ -550,6 +558,7 @@ func (s *Server) handlePlanProgress(ctx context.Context, req *Request) (*Respons
 	}
 
 	return &Response{Result: map[string]interface{}{
+		"id":               params.PlanID,
 		"plan_id":          params.PlanID,
 		"title":            planTitle,
 		"status":           planStatus,
@@ -591,6 +600,7 @@ func (s *Server) handleHumanReviewCreate(ctx context.Context, req *Request) (*Re
 
 	return &Response{Result: map[string]interface{}{
 		"id":          reviewID,
+		"review_id":   reviewID,
 		"review_type": params.ReviewType,
 		"entity_id":   params.EntityID,
 		"status":      "pending",
@@ -634,6 +644,7 @@ func (s *Server) handleHumanReviewDecide(ctx context.Context, req *Request) (*Re
 	}
 
 	return &Response{Result: map[string]interface{}{
+		"id":         params.ReviewID,
 		"review_id":  params.ReviewID,
 		"decision":   params.Decision,
 		"status":     "decided",
@@ -677,6 +688,7 @@ func (s *Server) handleHumanReviewPending(ctx context.Context, req *Request) (*R
 
 		reviews = append(reviews, map[string]interface{}{
 			"id":          id.String,
+			"review_id":   id.String,
 			"review_type": reviewType.String,
 			"entity_type": entityType.String,
 			"entity_id":   entityID.String,
@@ -733,6 +745,7 @@ func (s *Server) handlePRDParse(ctx context.Context, req *Request) (*Response, e
 	}
 
 	return &Response{Result: map[string]interface{}{
+		"id":                 prdID,
 		"prd_id":             prdID,
 		"title":              title,
 		"version":            version,
@@ -772,6 +785,7 @@ func (s *Server) handlePRDRequirementsExtract(ctx context.Context, req *Request)
 
 		requirements = append(requirements, map[string]interface{}{
 			"id":                  id.String,
+			"req_id":              id.String,
 			"type":                reqType.String,
 			"priority":            priority.String,
 			"title":               title.String,
@@ -785,6 +799,7 @@ func (s *Server) handlePRDRequirementsExtract(ctx context.Context, req *Request)
 	}
 
 	return &Response{Result: map[string]interface{}{
+		"id":           params.PRDID,
 		"prd_id":       params.PRDID,
 		"requirements": requirements,
 		"count":        len(requirements),
@@ -894,6 +909,7 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 	}
 
 	return &Response{Result: map[string]interface{}{
+		"id":                  planID,
 		"plan_id":             planID,
 		"title":               planTitle,
 		"prd_id":              params.PRDID,

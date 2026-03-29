@@ -25,7 +25,7 @@ import (
 	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
-var version = "2.3.9"
+var version = "2.4.5"
 
 func toInt(v interface{}) int {
 	if v == nil {
@@ -1906,11 +1906,18 @@ func printWorkflowResult(workflow string, result interface{}) {
 		}
 
 	case "tasks":
-		tasks, _ := m["tasks"].([]interface{})
-		if len(tasks) == 0 {
+		tasksRaw := m["tasks"]
+		var tasksList []interface{}
+		if s, ok := tasksRaw.([]interface{}); ok {
+			tasksList = s
+		} else if s, ok := tasksRaw.([]map[string]interface{}); ok {
+			for _, t := range s { tasksList = append(tasksList, t) }
+		}
+
+		if len(tasksList) == 0 {
 			fmt.Println("   (No tasks found)")
 		}
-		for _, t := range tasks {
+		for _, t := range tasksList {
 			tm, ok := t.(map[string]interface{})
 			if !ok {
 				continue
