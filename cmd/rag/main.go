@@ -41,7 +41,9 @@ func toInt(v interface{}) int {
 	case int64:
 		return int(val)
 	case bool:
-		if val { return 1 }
+		if val {
+			return 1
+		}
 		return 0
 	case string:
 		i, _ := strconv.Atoi(val)
@@ -114,7 +116,7 @@ func main() {
 
 	mcpCmd := flag.NewFlagSet("mcp", flag.ExitOnError)
 	mcpDir := mcpCmd.String("dir", "", "Base directory for plugins (default: ~)")
-	
+
 	bootstrapCmd := flag.NewFlagSet("bootstrap", flag.ExitOnError)
 	bootstrapPRD := bootstrapCmd.String("prd", "", "PRD file path (required)")
 	bootstrapPath := bootstrapCmd.String("path", ".", "Project base path")
@@ -259,10 +261,18 @@ func main() {
 		projectCmd.Parse(os.Args[2:])
 		runProject(*projectPath, *projectPRD, *projectTitle, *projectStack)
 	case "requirement":
-		requirementCmd.Parse(os.Args[2:])
+		reqArgs := os.Args[2:]
+		if len(reqArgs) > 0 && reqArgs[0] == "add" {
+			reqArgs = reqArgs[1:]
+		}
+		requirementCmd.Parse(reqArgs)
 		runRequirement(*requirementProject, *requirementText, *requirementPriority)
 	case "plan":
-		planCmd.Parse(os.Args[2:])
+		planArgs := os.Args[2:]
+		if len(planArgs) > 0 && planArgs[0] == "create" {
+			planArgs = planArgs[1:]
+		}
+		planCmd.Parse(planArgs)
 		runPlan(*planProject, *planTitle)
 	case "reset":
 		resetCmd.Parse(os.Args[2:])
@@ -1351,7 +1361,7 @@ func runBootstrap(prdFile, projectPath string) {
 	}
 
 	ctx := context.Background()
-	
+
 	fmt.Println("⏳ Executing Integrated Lifecycle (Fenrir -> Skoll -> Tyr -> Hati)...")
 	fmt.Println("   Note: This can take 1-2 minutes for large projects. Handled safely.")
 
@@ -1911,7 +1921,9 @@ func printWorkflowResult(workflow string, result interface{}) {
 		if s, ok := tasksRaw.([]interface{}); ok {
 			tasksList = s
 		} else if s, ok := tasksRaw.([]map[string]interface{}); ok {
-			for _, t := range s { tasksList = append(tasksList, t) }
+			for _, t := range s {
+				tasksList = append(tasksList, t)
+			}
 		}
 
 		if len(tasksList) == 0 {
@@ -1925,7 +1937,7 @@ func printWorkflowResult(workflow string, result interface{}) {
 			id, _ := tm["id"].(string)
 			title, _ := tm["title"].(string)
 			status, _ := tm["status"].(string)
-			
+
 			icon := "○"
 			if status == "completed" {
 				icon = "✓"
@@ -1941,7 +1953,9 @@ func printWorkflowResult(workflow string, result interface{}) {
 	case "diagnose":
 		if healthy, ok := m["healthy"].(bool); ok {
 			status := "Healthy"
-			if !healthy { status = "Unhealthy" }
+			if !healthy {
+				status = "Unhealthy"
+			}
 			fmt.Printf("   System Status: %s\n", status)
 		}
 		if issues, ok := m["issues"].([]interface{}); ok && len(issues) > 0 {
@@ -1958,8 +1972,10 @@ func printWorkflowResult(workflow string, result interface{}) {
 			}
 			for _, s := range steps {
 				sm, ok := s.(map[string]interface{})
-				if !ok { continue }
-				
+				if !ok {
+					continue
+				}
+
 				name, _ := sm["name"].(string)
 				status, _ := sm["status"].(string)
 				icon := "○"
@@ -1970,7 +1986,7 @@ func printWorkflowResult(workflow string, result interface{}) {
 				} else if status == "in_progress" {
 					icon = "▶"
 				}
-				
+
 				fmt.Printf("   %s [%-14s] %s\n", icon, status, name)
 				if out, ok := sm["output"].(string); ok && out != "" {
 					fmt.Printf("      Output: %s\n", out)

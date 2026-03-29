@@ -173,6 +173,18 @@ func RunBootstrap(projectPath string) {
 	skillsJSON, _ := json.MarshalIndent(skillsConfig, "", "  ")
 	os.WriteFile(skillsFile, skillsJSON, 0644)
 	fmt.Printf("✓ Created: %s\n", skillsFile)
+
+	rulesConfig := scanner.GenerateRulesConfig(analysis)
+	rulesFile := filepath.Join(bootstrapDir, "rules.json")
+	rulesJSON, _ := json.MarshalIndent(rulesConfig, "", "  ")
+	os.WriteFile(rulesFile, rulesJSON, 0644)
+	fmt.Printf("✓ Created: %s\n", rulesFile)
+
+	standardsConfig := scanner.GenerateStandardsConfig(analysis)
+	standardsFile := filepath.Join(bootstrapDir, "standards.json")
+	standardsJSON, _ := json.MarshalIndent(standardsConfig, "", "  ")
+	os.WriteFile(standardsFile, standardsJSON, 0644)
+	fmt.Printf("✓ Created: %s\n", standardsFile)
 }
 
 func RunStats(configPath string) error {
