@@ -913,7 +913,11 @@ func GetRecommendedAgents(analysis *ProjectAnalysis) []map[string]string {
 		"scope": "API, database, backend services",
 	})
 
-	if analysis.Architecture.HasFrontend || analysis.Stack.HasDocker {
+	if analysis == nil {
+		return agents
+	}
+
+	if (analysis.Architecture != nil && analysis.Architecture.HasFrontend) || (analysis.Stack != nil && analysis.Stack.HasDocker) {
 		agents = append(agents, map[string]string{
 			"name":  "frontend-agent",
 			"type":  "frontend",
@@ -922,7 +926,7 @@ func GetRecommendedAgents(analysis *ProjectAnalysis) []map[string]string {
 		})
 	}
 
-	if analysis.Stack.HasTests {
+	if analysis.Stack != nil && analysis.Stack.HasTests {
 		agents = append(agents, map[string]string{
 			"name":  "qa-agent",
 			"type":  "qa",
@@ -931,7 +935,7 @@ func GetRecommendedAgents(analysis *ProjectAnalysis) []map[string]string {
 		})
 	}
 
-	if analysis.Stack.HasDocker || analysis.Architecture.IsMonorepo {
+	if (analysis.Stack != nil && analysis.Stack.HasDocker) || (analysis.Architecture != nil && analysis.Architecture.IsMonorepo) {
 		agents = append(agents, map[string]string{
 			"name":  "devops-agent",
 			"type":  "devops",

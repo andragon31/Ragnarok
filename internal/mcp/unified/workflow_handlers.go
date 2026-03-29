@@ -1061,7 +1061,10 @@ func parseProjectAnalysis(result interface{}) (*scanner.ProjectAnalysis, error) 
 		return nil, fmt.Errorf("invalid result type")
 	}
 
-	analysis := &scanner.ProjectAnalysis{}
+	analysis := &scanner.ProjectAnalysis{
+		Architecture: &scanner.ArchitectureInfo{},
+		Stack:        &scanner.StackInfo{},
+	}
 
 	if name, ok := resultMap["name"].(string); ok {
 		analysis.Name = name
