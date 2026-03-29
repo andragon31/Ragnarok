@@ -24,7 +24,7 @@ import (
 	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
-var version = "2.2.4"
+var version = "2.2.6"
 
 type Plugin struct {
 	Name    string
@@ -622,7 +622,7 @@ func runIntegrate(projectPath string) {
 }
 
 func printUsage() {
-	fmt.Println(`Ragnarok v2.2.4 - AI Governance & Memory Layer
+	fmt.Println(`Ragnarok v2.2.6 - AI Governance & Memory Layer
 
 Usage:
   rag project --path DIR [--prd FILE]      Analyze or init project (Recommended)
@@ -1500,7 +1500,7 @@ func runPlan(projectPath, title string) {
 	}
 
 	planResult, err := srv.ExecuteWorkflow(ctx, "plan_create", map[string]interface{}{
-		"title":       projectName + " Plan",
+		"title":       "Ragnarok MCP Ecosystem v2.2.6 Plan",
 		"description": requirementsText,
 		"risk_level":  "medium",
 	})

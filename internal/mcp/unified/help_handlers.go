@@ -116,18 +116,36 @@ func (s *Server) handleRagnarokHelp(ctx context.Context, req *Request) (*Respons
 		return &Response{Result: map[string]interface{}{
 			"title": "Recommended Workflows",
 			"recommended": []map[string]string{
-				{"name": "workflow_project_lifecycle", "desc": "Full project setup: scan + plan + phases + tasks"},
-				{"name": "workflow_stack_based_init", "desc": "Stack-based plan initialization"},
-				{"name": "workflow_plan_develop_v2", "desc": "Multi-agent development loop"},
-				{"name": "workflow_checkpoint_create", "desc": "Quality milestone with human review"},
+				{"name": "workflow_project_lifecycle", "desc": "Recommended full start: PRD Analysis -> Skoll Agents & Team -> Hati Planning -> Task Assignment -> Tyr Quality Baseline"},
+				{"name": "workflow_team_setup_from_prd", "desc": "PRD Analysis -> Skoll Agents -> Team Creation"},
+				{"name": "workflow_stack_based_init", "desc": "Stack-based plan initialization with Hati"},
+				{"name": "workflow_plan_develop_v2", "desc": "Multi-agent development loop with task delegation"},
+				{"name": "workflow_checkpoint_create", "desc": "Quality milestone with human review and validation"},
 			},
+		}}, nil
+	case "project_init":
+		return &Response{Result: map[string]interface{}{
+			"title": "Project Initialization from PRD",
+			"description": "The best way to start a project is using the integrated lifecycle workflow.",
+			"command_example": "workflow_project_lifecycle(project_path='./path', prd_file='./PRD.md', title='Project Name')",
+			"what_it_does": []string{
+				"1. Analyzes tech stack and architecture (Fenrir)",
+				"2. Parses the PRD to extract requirements (Hati)",
+				"3. Creates specialized agents in Skoll (Backend, Frontend, etc.)",
+				"4. Forms a project team and assigns them (Skoll)",
+				"5. Generates a multi-phase development plan (Hati)",
+				"6. Auto-assigns agents to matching tasks",
+				"7. Runs a security baseline scan (Tyr)",
+				"8. Stores all context in persistent memory (Fenrir)",
+			},
+			"next_steps": "After initialization, wait for 'human_review_pending' to approve the plan, then start 'task_get_next'.",
 		}}, nil
 	default:
 		return &Response{Result: map[string]interface{}{
 			"title":       "Ragnarok MCP Ecosystem v2.2.4",
 			"description": "Orchestrates AI agents for software development. Modules: Fenrir (memory), Hati (planning), Skoll (orchestration), Tyr (quality).",
-			"quick_start": "Call ragnarok_help(topic='getting_started') for step-by-step instructions.",
-			"topics":      []string{"getting_started", "planning", "memory", "quality", "orchestration", "workflows"},
+			"quick_start": "Call ragnarok_help(topic='getting_started') or topic='project_init' for PRD-driven setup.",
+			"topics":      []string{"getting_started", "project_init", "planning", "memory", "quality", "orchestration", "workflows"},
 		}}, nil
 	}
 }

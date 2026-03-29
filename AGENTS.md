@@ -92,11 +92,29 @@ rag setup gemini    # Configurar Gemini CLI MCP
 { "mcpServers": { "ragnarok": { "command": "rag", "args": ["mcp"] } } }
 ```
 
-## Workflows MCP Principales
+## Workflow de Inicio de Proyecto (PRD-Driven)
+
+Para inicializar un proyecto desde cero con un PRD, los agentes DEBEN utilizar el workflow integrado. Esto configura automáticamente los 4 módulos.
+
+**Herramienta:** `workflow_project_lifecycle`
+**Parámetros:**
+- `project_path`: Ruta raíz del proyecto.
+- `prd_file`: Ruta al archivo PRD.
+- `title`: (Opcional) Título del proyecto.
+
+**Efectos:**
+1. **Analiza** el stack técnico y arquitectura (Fenrir).
+2. **Parsea** requerimientos del PRD (Hati).
+3. **Crea** agentes especialistas en Skoll y forma un equipo.
+4. **Genera** un plan de desarrollo con fases y tareas (Hati).
+5. **Asigna** automáticamente los agentes a las tareas según su rol.
+6. **Ejecuta** un escaneo de seguridad inicial (Tyr).
 
 | Workflow | Descripción |
 |----------|-------------|
-| `workflow_stack_based_init` | Detecta stack y crea plan completo |
+| `workflow_project_lifecycle` | Inicialización completa (Recomendado para nuevos proyectos) |
+| `workflow_team_setup_from_prd` | Solo creación de agentes y equipo desde PRD |
+| `workflow_stack_based_init` | Creación de plan basado en stack (sin PRD) |
 | `workflow_plan_develop_v2` | Desarrollo multi-agente con delegation |
 | `workflow_checkpoint_create` | Validación de calidad con human review |
 
