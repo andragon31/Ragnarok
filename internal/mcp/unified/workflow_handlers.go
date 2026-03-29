@@ -181,7 +181,7 @@ func (s *Server) handleWorkflowPRDAnalyze(ctx context.Context, req *Request) (*R
 		"prd_id":         prdID,
 		"plan_id":        planID,
 		"stack_detected": analysis != nil,
-		"stack":          analysis.Stack,
+		"stack":          getStackFromAnalysis(analysis),
 		"steps":          steps,
 		"results":        results,
 		"message":        "Plan created with stack-based phases. Human review required before activation.",
@@ -897,6 +897,16 @@ func (s *Server) handleWorkflowPlanDevelopV2(ctx context.Context, req *Request) 
 		"progress": planProgress,
 		"steps":    steps,
 	}}, nil
+}
+
+func getStackFromAnalysis(analysis *scanner.ProjectAnalysis) string {
+	if analysis == nil || analysis.Stack == nil {
+		return ""
+	}
+	if analysis.Stack.Language != "" {
+		return analysis.Stack.Language
+	}
+	return ""
 }
 
 func parseProjectAnalysis(result interface{}) (*scanner.ProjectAnalysis, error) {
