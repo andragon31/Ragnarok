@@ -691,8 +691,9 @@ func (s *Server) handleWorkflowStackBasedInit(ctx context.Context, req *Request)
 	}
 
 	step("plan_create", func() (interface{}, error) {
+		stack, arch := getStackInfoSafe(analysis)
 		desc := fmt.Sprintf("Plan for %s - %s architecture with %s",
-			analysis.Name, analysis.Architecture.Type, analysis.Stack.Language)
+			analysis.Name, arch, stack)
 		return s.callTool(ctx, "plan_create", map[string]interface{}{
 			"title":       params.Title,
 			"description": desc,
@@ -778,11 +779,12 @@ func (s *Server) handleWorkflowStackBasedInit(ctx context.Context, req *Request)
 	}
 
 	step("human_review_create", func() (interface{}, error) {
+		stackLang := getStackLanguage(analysis)
 		return s.callTool(ctx, "human_review_create", map[string]interface{}{
 			"review_type": "prd_approval",
 			"entity_type": "plan",
 			"entity_id":   planID,
-			"question":    fmt.Sprintf("¿Apruebas este plan de %d fases con %d tareas basado en tu stack de %s?", len(phaseIDs), len(taskIDs), analysis.Stack.Language),
+			"question":    fmt.Sprintf("¿Apruebas este plan de %d fases con %d tareas basado en tu stack de %s?", len(phaseIDs), len(taskIDs), stackLang),
 		})
 	})
 
@@ -792,12 +794,12 @@ func (s *Server) handleWorkflowStackBasedInit(ctx context.Context, req *Request)
 		"plan_id":      planID,
 		"phase_ids":    phaseIDs,
 		"task_ids":     taskIDs,
-		"stack":        analysis.Stack,
-		"architecture": analysis.Architecture,
+		"stack":        getStackLanguage(analysis),
+		"architecture": analysis != nil && analysis.Architecture != nil,
 		"agents":       recommendedAgents,
 		"steps":        steps,
 		"results":      results,
-		"message":      fmt.Sprintf("Plan created with %d phases and %d tasks based on %s stack", len(phaseIDs), len(taskIDs), analysis.Stack.Language),
+		"message":      fmt.Sprintf("Plan created with %d phases and %d tasks based on %s stack", len(phaseIDs), len(taskIDs), getStackLanguage(analysis)),
 	}}, nil
 }
 
@@ -907,6 +909,39 @@ func getStackFromAnalysis(analysis *scanner.ProjectAnalysis) string {
 		return analysis.Stack.Language
 	}
 	return ""
+}
+
+func getStackInfoSafe(analysis *scanner.ProjectAnalysis) (stack, arch string) {
+	if analysis == nil {
+		return "unknown", "unknown"
+	}
+	stack = "unknown"
+	arch = "unknown"
+	if analysis.Stack != nil {
+		if analysis.Stack.Framework != "" {
+			stack = analysis.Stack.Language + " with " + analysis.Stack.Framework
+		} else {
+			stack = analysis.Stack.Language
+		}
+	}
+	if analysis.Architecture != nil {
+		arch = analysis.Architecture.Type
+	}
+	return stack, arch
+}
+
+func hasFrontend(analysis *scanner.ProjectAnalysis) bool {
+	if analysis == nil || analysis.Architecture == nil {
+		return false
+	}
+	return analysis.Architecture.HasFrontend
+}
+
+func getStackLanguage(analysis *scanner.ProjectAnalysis) string {
+	if analysis == nil || analysis.Stack == nil {
+		return ""
+	}
+	return analysis.Stack.Language
 }
 
 func parseProjectAnalysis(result interface{}) (*scanner.ProjectAnalysis, error) {
@@ -1045,12 +1080,7 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 	}
 
 	step("Fenrir: Store Project Context", func() (interface{}, error) {
-		stackInfo := "unknown"
-		archInfo := "unknown"
-		if analysis != nil {
-			stackInfo = fmt.Sprintf("%s with %s", analysis.Stack.Language, analysis.Stack.Framework)
-			archInfo = analysis.Architecture.Type
-		}
+		stackInfo, archInfo := getStackInfoSafe(analysis)
 		return s.callTool(ctx, "mem_save", map[string]interface{}{
 			"title": "Project: " + projectName,
 			"type":  "decision",
@@ -1110,11 +1140,12 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 		planTitle = params.Title
 	}
 
-	stackInfo := "auto"
-	archInfo := "auto"
-	if analysis != nil {
-		stackInfo = analysis.Stack.Language
-		archInfo = analysis.Architecture.Type
+	stackInfo, archInfo := getStackInfoSafe(analysis)
+	if stackInfo == "unknown" {
+		stackInfo = "auto"
+	}
+	if archInfo == "unknown" {
+		archInfo = "auto"
 	}
 	planDesc := fmt.Sprintf("Stack: %s, Architecture: %s", stackInfo, archInfo)
 
@@ -1218,12 +1249,10 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 	}
 
 	recommendedTypes := []string{"backend", "frontend", "qa", "devops"}
-	if analysis != nil {
-		if analysis.Architecture.HasFrontend {
-			recommendedTypes = []string{"backend", "frontend", "qa", "devops"}
-		} else {
-			recommendedTypes = []string{"backend", "qa", "devops"}
-		}
+	if hasFrontend(analysis) {
+		recommendedTypes = []string{"backend", "frontend", "qa", "devops"}
+	} else {
+		recommendedTypes = []string{"backend", "qa", "devops"}
 	}
 
 	for _, agentType := range recommendedTypes {
@@ -1238,10 +1267,11 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 	}
 
 	step("Tyr: Validate Project Dependencies", func() (interface{}, error) {
-		if analysis != nil && analysis.Stack.Language != "" {
+		stackLang := getStackLanguage(analysis)
+		if stackLang != "" {
 			return s.callTool(ctx, "pkg_check", map[string]interface{}{
-				"name":      analysis.Stack.Language,
-				"ecosystem": getEcosystem(analysis.Stack.Language),
+				"name":      stackLang,
+				"ecosystem": getEcosystem(stackLang),
 			})
 		}
 		return map[string]interface{}{"status": "skipped", "reason": "no stack detected"}, nil
