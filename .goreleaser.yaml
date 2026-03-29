@@ -41,6 +41,9 @@ archives:
       - LICENSE
       - AGENTS.md
       - CHANGELOG.md
+      - install.ps1
+      - install.sh
+      - install_quick.ps1
 
 checksum:
   name_template: "checksums.txt"
