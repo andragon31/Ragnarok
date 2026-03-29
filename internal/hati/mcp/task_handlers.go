@@ -819,7 +819,6 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 	}
 
 	requirementsQuery := `SELECT id, req_type, priority, title, description FROM prd_requirements WHERE prd_id = ?`
-	log.Printf("[DEBUG] plan_create_from_prd: querying requirements with prdID=%s", params.PRDID)
 	rows, err := s.db.Query(requirementsQuery, params.PRDID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get requirements: %w", err)
@@ -845,10 +844,6 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating requirements: %w", err)
-	}
-	log.Printf("[DEBUG] plan_create_from_prd: found %d requirements", len(requirements))
-	for i, r := range requirements {
-		log.Printf("[DEBUG] requirement[%d]: id=%s, title=%s", i, r.ID, r.Title)
 	}
 
 	type taskInfo struct {
@@ -917,7 +912,6 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 	}
 
 	taskIDs := []string{}
-	log.Printf("[DEBUG] plan_create_from_prd: creating %d tasks", len(tasksToCreate))
 	for _, t := range tasksToCreate {
 		taskID := generateID("task")
 		taskQuery := `INSERT INTO tasks (id, phase_id, title, status, priority, created_at, updated_at)
@@ -932,7 +926,6 @@ func (s *Server) handlePlanCreateFromPRD(ctx context.Context, req *Request) (*Re
 			return nil, fmt.Errorf("failed to create task: %w", err)
 		}
 		taskIDs = append(taskIDs, taskID)
-		log.Printf("[DEBUG] created task: id=%s, title=%s, phaseIndex=%d", taskID, t.Title, t.PhaseIndex)
 	}
 
 	return &Response{Result: map[string]interface{}{
@@ -1084,7 +1077,7 @@ func (s *Server) extractRequirements(content string, prdID string) ([]map[string
 
 	for i, match := range reWithoutBracket.FindAllStringSubmatch(content, -1) {
 		title := strings.TrimSpace(match[1])
-		if title == "" {
+		if title == "" || strings.HasPrefix(title, "[") {
 			continue
 		}
 		reqID := fmt.Sprintf("REQ-%03d", i+1)
