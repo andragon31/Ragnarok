@@ -1,14 +1,20 @@
-# Ragnarok Installer v2.2.3
+# Ragnarok Installer
 # AI Governance & Memory Layer Ecosystem
 # Usage: 
+#   irm https://raw.githubusercontent.com/andragon31/Ragnarok/vX.X.X/install.ps1 | iex
 #   irm https://raw.githubusercontent.com/andragon31/Ragnarok/v2.2.3/install.ps1 | iex
-#   Or download and run manually
+#   Or: powershell -File install.ps1 -Version 2.2.3
 
 param(
-    [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok"
+    [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok",
+    [string]$Version = ""
 )
 
-$VERSION = "2.2.3"
+if ($Version -eq "") {
+    $VERSION = "2.2.3"
+} else {
+    $VERSION = $Version
+}
 $REPO_URL = "https://github.com/andragon31/Ragnarok"
 
 # Save script to temp if running from remote (irm | iex)
@@ -18,7 +24,7 @@ if ($MyInvocation.InvocationName -eq "iex") {
     $content | Set-Content $scriptPath -Encoding UTF8
     Write-Host "Script saved to: $scriptPath" -ForegroundColor Yellow
     Write-Host "Running locally...`n" -ForegroundColor Yellow
-    & $scriptPath -InstallDir $InstallDir
+    & $scriptPath -InstallDir $InstallDir -Version $Version
     Remove-Item $scriptPath -ErrorAction SilentlyContinue
     exit
 }
