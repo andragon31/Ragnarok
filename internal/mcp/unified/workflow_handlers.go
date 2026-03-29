@@ -517,7 +517,7 @@ func (s *Server) callTool(ctx context.Context, toolName string, params map[strin
 		return nil, nil
 	}
 
-	return result, nil
+	return result.Result, nil
 }
 
 func (s *Server) handleEcosystemDiagnose(ctx context.Context, req *Request) (*Response, error) {

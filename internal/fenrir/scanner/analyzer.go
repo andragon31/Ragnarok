@@ -782,34 +782,55 @@ type TaskTemplate struct {
 func GeneratePhasesAndTasks(analysis *ProjectAnalysis) []PhaseTemplate {
 	phases := []PhaseTemplate{}
 
+	if analysis == nil {
+		return phases
+	}
+
+	stack := analysis.Stack
+	arch := analysis.Architecture
+
+	safeGetStr := func(s string) string {
+		if s == "" {
+			return "unknown"
+		}
+		return s
+	}
+
+	if stack == nil {
+		stack = &StackInfo{}
+	}
+	if arch == nil {
+		arch = &ArchitectureInfo{}
+	}
+
 	phases = append(phases, PhaseTemplate{
 		Name:        "Setup",
 		Description: "Initialize project structure and dependencies",
 		AgentType:   "backend",
 		Tasks: []TaskTemplate{
 			{Title: "Setup project structure", Description: "Create base directories and configuration files", Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
-			{Title: "Install dependencies", Description: "Install all required dependencies for " + analysis.Stack.PackageMgr, Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
+			{Title: "Install dependencies", Description: "Install all required dependencies for " + safeGetStr(stack.PackageMgr), Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
 		},
 	})
 
-	if analysis.Architecture.HasAPI || analysis.Stack.Framework != "" {
+	if arch.HasAPI || stack.Framework != "" {
 		phases = append(phases, PhaseTemplate{
 			Name:        "Backend",
-			Description: "Implement backend services with " + analysis.Stack.Framework,
+			Description: "Implement backend services with " + safeGetStr(stack.Framework),
 			AgentType:   "backend",
 			Tasks: []TaskTemplate{
 				{Title: "Design database schema", Description: "Create database models and migrations", Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
-				{Title: "Implement API endpoints", Description: "Create REST/GraphQL endpoints for " + analysis.Stack.Framework, Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
+				{Title: "Implement API endpoints", Description: "Create REST/GraphQL endpoints for " + safeGetStr(stack.Framework), Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
 				{Title: "Implement business logic", Description: "Add service layer and business rules", Priority: 2, Milestone: false, AgentTypes: []string{"backend"}},
 				{Title: "Add authentication", Description: "Implement auth endpoints and middleware", Priority: 3, Milestone: false, AgentTypes: []string{"backend", "security"}},
 			},
 		})
 	}
 
-	if analysis.Architecture.HasFrontend || analysis.Stack.HasDocker {
-		frontendFramework := analysis.Architecture.FrontendLib
+	if arch.HasFrontend || stack.HasDocker {
+		frontendFramework := arch.FrontendLib
 		if frontendFramework == "" {
-			frontendFramework = analysis.Stack.Framework
+			frontendFramework = stack.Framework
 		}
 		phases = append(phases, PhaseTemplate{
 			Name:        "Frontend",
@@ -824,30 +845,30 @@ func GeneratePhasesAndTasks(analysis *ProjectAnalysis) []PhaseTemplate {
 		})
 	}
 
-	if analysis.Stack.DBEngine != "" {
+	if stack.DBEngine != "" {
 		phases = append(phases, PhaseTemplate{
 			Name:        "Database",
-			Description: "Setup and optimize database for " + analysis.Stack.DBEngine,
+			Description: "Setup and optimize database for " + safeGetStr(stack.DBEngine),
 			AgentType:   "backend",
 			Tasks: []TaskTemplate{
-				{Title: "Create database schema", Description: "Design and create tables for " + analysis.Stack.DBEngine, Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
+				{Title: "Create database schema", Description: "Design and create tables for " + safeGetStr(stack.DBEngine), Priority: 3, Milestone: false, AgentTypes: []string{"backend"}},
 				{Title: "Add migrations", Description: "Setup database migration system", Priority: 2, Milestone: false, AgentTypes: []string{"backend"}},
 				{Title: "Seed data", Description: "Add seed data for development", Priority: 1, Milestone: false, AgentTypes: []string{"backend"}},
 			},
 		})
 	}
 
-	if analysis.Stack.HasTests {
-		testFramework := analysis.Stack.TestFramework
+	if stack.HasTests {
+		testFramework := stack.TestFramework
 		if testFramework == "" {
 			testFramework = "testing"
 		}
 		phases = append(phases, PhaseTemplate{
 			Name:        "Testing",
-			Description: "Implement tests with " + testFramework,
+			Description: "Implement tests with " + safeGetStr(testFramework),
 			AgentType:   "qa",
 			Tasks: []TaskTemplate{
-				{Title: "Setup test infrastructure", Description: "Configure " + testFramework + " for the project", Priority: 3, Milestone: false, AgentTypes: []string{"qa", "backend"}},
+				{Title: "Setup test infrastructure", Description: "Configure " + safeGetStr(testFramework) + " for the project", Priority: 3, Milestone: false, AgentTypes: []string{"qa", "backend"}},
 				{Title: "Write unit tests", Description: "Add unit tests for core business logic", Priority: 2, Milestone: false, AgentTypes: []string{"qa", "backend"}},
 				{Title: "Write integration tests", Description: "Add integration tests for API endpoints", Priority: 2, Milestone: false, AgentTypes: []string{"qa", "backend"}},
 				{Title: "Setup E2E tests", Description: "Add end-to-end tests if applicable", Priority: 1, Milestone: false, AgentTypes: []string{"qa"}},
@@ -855,14 +876,14 @@ func GeneratePhasesAndTasks(analysis *ProjectAnalysis) []PhaseTemplate {
 		})
 	}
 
-	if analysis.Stack.HasDocker || analysis.Architecture.IsMonorepo {
+	if stack.HasDocker || arch.IsMonorepo {
 		phases = append(phases, PhaseTemplate{
 			Name:        "DevOps",
 			Description: "Setup deployment and CI/CD",
 			AgentType:   "devops",
 			Tasks: []TaskTemplate{
 				{Title: "Create Dockerfile", Description: "Add container configuration", Priority: 3, Milestone: false, AgentTypes: []string{"devops"}},
-				{Title: "Setup CI/CD pipeline", Description: "Configure " + analysis.Stack.CITool + " for automated builds", Priority: 3, Milestone: false, AgentTypes: []string{"devops"}},
+				{Title: "Setup CI/CD pipeline", Description: "Configure " + safeGetStr(stack.CITool) + " for automated builds", Priority: 3, Milestone: false, AgentTypes: []string{"devops"}},
 				{Title: "Add deployment config", Description: "Setup deployment scripts and configs", Priority: 2, Milestone: false, AgentTypes: []string{"devops"}},
 			},
 		})

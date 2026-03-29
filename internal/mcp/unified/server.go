@@ -301,7 +301,7 @@ func (s *Server) ExecuteWorkflow(ctx context.Context, workflow string, params ma
 		return nil, nil
 	}
 
-	return result, nil
+	return result.Result, nil
 }
 
 func (s *Server) CallTool(ctx context.Context, tool string, params map[string]interface{}) (interface{}, error) {
