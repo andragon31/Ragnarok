@@ -84,8 +84,8 @@ Write-Step "2. Verifying checksum"
 
 $checksums = (Invoke-RestMethod -Uri $CHECKSUM_URL -UseBasicParsing).Content
 $assetEscaped = [regex]::Escape($ASSET)
-$match = $checksums -match "^\s*([a-fA-F0-9]+)\s+${assetEscaped}\s*$"
-if (-not $match) {
+$checksumLine = $checksums.Split([char]0x0A) | Where-Object { $_.Trim([char]0x0D) -match "^\s*([a-fA-F0-9]+)\s+${assetEscaped}\s*$" }
+if (-not $checksumLine) {
     Remove-Item $zipPath -ErrorAction SilentlyContinue
     Write-Err "Could not find checksum for $ASSET in checksums.txt"
     throw "Checksum verification failed"
