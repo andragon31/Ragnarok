@@ -1205,17 +1205,14 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 				prdID = id
 				
 				// Guardar requerimientos en memoria
-				if reqs, ok := prdMap["requirements"].([]interface{}); ok {
-					for _, r := range reqs {
-						if reqText, ok := r.(string); ok {
-							s.callTool(ctx, "mem_save", map[string]interface{}{
-								"title": "Requirement: " + reqText[:min(50, len(reqText))],
-								"type":  "requirement",
-								"what":  reqText,
-								"where": params.ProjectPath,
-							})
-						}
-					}
+				// Optimization: save all requirements in a single batch to avoid IDE timeouts
+				if reqs, ok := prdMap["requirements"].([]interface{}); ok && len(reqs) > 0 {
+					reqsJSON, _ := json.Marshal(reqs)
+					s.callTool(ctx, "mem_save", map[string]interface{}{
+						"content":  string(reqsJSON),
+						"type":     "requirement_batch",
+						"metadata": map[string]string{"project": projectName, "source": "prd_parse"},
+					})
 				}
 			}
 		}

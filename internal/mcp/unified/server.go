@@ -69,7 +69,7 @@ func NewServer(dataDir string) (*Server, error) {
 		handlers:      make(map[string]mcp.ToolHandler),
 		tools:         []Tool{},
 		serverName:    "ragnarok",
-		serverVersion: "2.2.7",
+		serverVersion: "2.2.8",
 		dbPaths:       make(map[string]string),
 	}
 

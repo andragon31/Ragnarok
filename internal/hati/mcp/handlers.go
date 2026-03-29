@@ -70,16 +70,18 @@ func (s *Server) handlePlanGet(ctx context.Context, req *Request) (*Response, er
 	query := `SELECT id, session_id, title, description, status, risk_level, spec_impact, module_hints_used, quality_source, created_at, updated_at, completed_at
 			  FROM plans WHERE id = ?`
 	plan := &Plan{}
-	var specImpact, moduleHints sql.NullString
+	var sessionID, description, specImpact, moduleHints sql.NullString
 	var completedAt sql.NullTime
 	err := s.db.QueryRow(query, params.PlanID).Scan(
-		&plan.ID, &plan.SessionID, &plan.Title, &plan.Description, &plan.Status,
+		&plan.ID, &sessionID, &plan.Title, &description, &plan.Status,
 		&plan.RiskLevel, &specImpact, &moduleHints, &plan.QualitySource,
 		&plan.CreatedAt, &plan.UpdatedAt, &completedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("plan not found: %w", err)
 	}
+	plan.SessionID = sessionID.String
+	plan.Description = description.String
 	plan.SpecImpact = specImpact.String
 	plan.ModuleHintsUsed = moduleHints.String
 	if completedAt.Valid {
