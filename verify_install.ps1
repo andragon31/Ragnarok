@@ -1,5 +1,9 @@
-# Ragnarok Installer Verification Script
-# Run this after installation to verify everything works
+# Ragnarok v2.2.4 - Installation Verification Script
+# Tests the unified binary architecture (single rag.exe)
+# Usage:
+#   .\verify_install.ps1
+#   .\verify_install.ps1 -Verbose
+#   .\verify_install.ps1 -InstallDir "C:\MyCustomPath\Ragnarok"
 
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\Ragnarok",
@@ -7,146 +11,172 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$testsPassed = 0
-$testsFailed = 0
+$passed = 0
+$failed = 0
 
-function Test-Item($name, $condition, $errorMsg) {
-    if ($condition) {
-        Write-Host "[PASS] $name" -ForegroundColor Green
-        return $true
-    } else {
-        Write-Host "[FAIL] $name - $errorMsg" -ForegroundColor Red
-        return $false
+function Pass($name) {
+    Write-Host "[PASS] $name" -ForegroundColor Green
+    $script:passed++
+}
+
+function Fail($name, $reason) {
+    Write-Host "[FAIL] $name — $reason" -ForegroundColor Red
+    $script:failed++
+}
+
+function Skip($name, $reason) {
+    if ($Verbose) {
+        Write-Host "[SKIP] $name — $reason" -ForegroundColor Gray
     }
 }
 
 Write-Host @"
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   Ragnarok v1.2.0 - Installation Verification                  ║
+║   Ragnarok v2.2.4 - Installation Verification                 ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
 "@ -ForegroundColor Cyan
 
 Write-Host "`nChecking installation in: $InstallDir`n" -ForegroundColor White
 
-# Test 1: Binary directory exists
-$binDir = Join-Path $InstallDir "bin"
-if (Test-Item "Binary directory exists" (Test-Path $binDir) "Run installer first") {
-    $testsPassed++
-    
-    # Test binaries
-    $binaries = @("fenrir.exe", "hati.exe", "skoll.exe", "tyr.exe", "rag.exe")
-    foreach ($bin in $binaries) {
-        $binPath = Join-Path $binDir $bin
-        $exists = Test-Path $binPath
-        if (Test-Item "$bin exists" $exists "Missing") {
-            $testsPassed++
+# ─── 1. Unified binary ───────────────────────────────────────────────────────
+Write-Host "── Binary ────────────────────────────────────────" -ForegroundColor DarkCyan
+
+$ragBin = Join-Path $InstallDir "rag.exe"
+if (Test-Path $ragBin) {
+    Pass "rag.exe exists ($ragBin)"
+
+    # version command
+    try {
+        $ver = & $ragBin version 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Pass "rag version: $ver"
         } else {
-            $testsFailed++
+            Fail "rag version" "exit code $LASTEXITCODE"
         }
-        
-        # Test version command
-        if ($exists) {
-            try {
-                $version = & $binPath version 2>$null
-                if ($LASTEXITCODE -eq 0 -and $version) {
-                    if (Test-Item "$bin runs" $true "Failed to run") {
-                        $testsPassed++
-                        if ($Verbose) { Write-Host "       $version" -ForegroundColor Gray }
-                    }
-                } else {
-                    $testsFailed++
-                }
-            } catch {
-                if (Test-Item "$bin runs" $false "Error: $_") { }
-                $testsFailed++
-            }
-        } else {
-            $testsFailed++
-        }
+    } catch {
+        Fail "rag version" "exception: $_"
     }
+
+    # doctor command
+    try {
+        $doc = & $ragBin doctor 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Pass "rag doctor passed"
+            if ($Verbose) { $doc | ForEach-Object { Write-Host "       $_" -ForegroundColor Gray } }
+        } else {
+            Fail "rag doctor" ($doc | Select-Object -First 3 | Out-String).Trim()
+        }
+    } catch {
+        Fail "rag doctor" "exception: $_"
+    }
+
+    # MCP stdio responds
+    try {
+        $initMsg = '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"verify","version":"1"}}}'
+        $mcp = $initMsg | & $ragBin mcp 2>$null | Select-Object -First 1
+        if ($mcp -match '"result"') {
+            Pass "MCP stdio responds"
+        } else {
+            Fail "MCP stdio" "no valid response (got: $($mcp | Select-Object -First 1))"
+        }
+    } catch {
+        Fail "MCP stdio" "exception: $_"
+    }
+
 } else {
-    $testsFailed++
+    Fail "rag.exe exists" "not found at $ragBin — run installer first"
 }
 
-# Test MCP config
-Write-Host "`nChecking MCP configuration..." -ForegroundColor White
-$mcpPaths = @(
-    "$env:APPDATA\opencode\.mcp.json",
-    "$env:LOCALAPPDATA\opencode\.mcp.json",
-    "$env:USERPROFILE\.opencode\.mcp.json"
-)
+# ─── 2. PATH ─────────────────────────────────────────────────────────────────
+Write-Host "`n── PATH ──────────────────────────────────────────" -ForegroundColor DarkCyan
 
-$mcpFound = $false
-foreach ($path in $mcpPaths) {
+$inPath = $env:PATH -split ";" | Where-Object { $_ -like "*Ragnarok*" }
+if ($inPath) {
+    Pass "PATH contains Ragnarok dir ($($inPath | Select-Object -First 1))"
+} else {
+    Fail "PATH" "Ragnarok dir not in PATH — restart terminal or re-run installer"
+}
+
+# Verify rag is resolvable from PATH
+$ragInPath = Get-Command "rag" -ErrorAction SilentlyContinue
+if ($ragInPath) {
+    Pass "rag resolves from PATH ($($ragInPath.Source))"
+} else {
+    Fail "rag resolves from PATH" "not resolvable — may need to restart terminal"
+}
+
+# ─── 3. MCP config for detected IDEs ─────────────────────────────────────────
+Write-Host "`n── MCP Configuration ────────────────────────────" -ForegroundColor DarkCyan
+
+$ideConfigs = @{
+    "OpenCode"         = "$env:USERPROFILE\.config\opencode\opencode.json"
+    "Cursor"           = "$env:USERPROFILE\.cursor\mcp.json"
+    "Windsurf"         = "$env:USERPROFILE\.windsurf\mcp.json"
+    "Claude Code"      = "$env:USERPROFILE\.claude\settings.json"
+    "Gemini CLI"       = "$env:USERPROFILE\.gemini\settings.json"
+}
+
+$anyIdeFound = $false
+foreach ($ide in $ideConfigs.Keys) {
+    $path = $ideConfigs[$ide]
     if (Test-Path $path) {
-        $mcpFound = $true
-        if (Test-Item ".mcp.json found" $true "at $path") {
-            $testsPassed++
-            
-            try {
-                $content = Get-Content $path -Raw | ConvertFrom-Json
-                $servers = $content.mcpServers.PSObject.Properties.Name
-                
-                foreach ($server in @("fenrir", "hati", "skoll", "tyr")) {
-                    if ($servers -contains $server) {
-                        if (Test-Item "  $server configured" $true "") {
-                            $testsPassed++
-                        }
-                    } else {
-                        if (Test-Item "  $server configured" $false "Missing from .mcp.json") {
-                            $testsFailed++
-                        }
-                    }
-                }
-            } catch {
-                if (Test-Item ".mcp.json valid JSON" $false "Parse error: $_") {
-                    $testsFailed++
-                }
+        $anyIdeFound = $true
+        try {
+            $json = Get-Content $path -Raw | ConvertFrom-Json
+            # Check both mcpServers (standard) and mcp (OpenCode legacy)
+            $ragFound = $false
+            if ($json.mcpServers -and $json.mcpServers.ragnarok) { $ragFound = $true }
+            if ($json.mcp -and $json.mcp.ragnarok)               { $ragFound = $true }
+            if ($ragFound) {
+                Pass "MCP config: $ide ($path)"
+            } else {
+                Fail "MCP config: $ide" "ragnarok server not found — run 'rag setup $(($ide -replace ' ','').ToLower())'"
             }
+        } catch {
+            Fail "MCP config: $ide" "JSON parse error — $_"
         }
-        break
+    } else {
+        Skip "MCP config: $ide" "not installed (config not found at $path)"
     }
 }
 
-if (!$mcpFound) {
-    if (Test-Item ".mcp.json found" $false "Not in expected locations") {
-        $testsFailed++
-    }
+if (-not $anyIdeFound) {
+    Write-Host "[INFO] No supported IDEs detected. Run 'rag setup <ide>' after installing an IDE." -ForegroundColor Yellow
 }
 
-# Test data directories
-Write-Host "`nChecking data directories..." -ForegroundColor White
-$dataDir = Join-Path $InstallDir "data"
-if (Test-Item "Data directory exists" (Test-Path $dataDir) "") {
-    $testsPassed++
-    
-    $plugins = @("fenrir", "hati", "skoll", "tyr")
-    foreach ($plugin in $plugins) {
-        $pluginDir = Join-Path $dataDir ".$plugin"
-        if (Test-Item "  .$plugin directory" (Test-Path $pluginDir) "") {
-            $testsPassed++
+# ─── 4. Data directory ────────────────────────────────────────────────────────
+Write-Host "`n── Data Directories ─────────────────────────────" -ForegroundColor DarkCyan
+
+$dataDir = "$env:USERPROFILE\.ragnarok"
+if (Test-Path $dataDir) {
+    Pass "Data dir exists (~/.ragnarok)"
+    foreach ($db in @("fenrir.db", "hati.db", "skoll.db", "tyr.db")) {
+        $dbPath = Join-Path $dataDir $db
+        if (Test-Path $dbPath) {
+            if ($Verbose) { Pass "  $db" }
         } else {
-            $testsFailed++
+            if ($Verbose) { Write-Host "[INFO]   $db not yet created (normal — created on first use)" -ForegroundColor Gray }
         }
     }
 } else {
-    $testsFailed++
+    Write-Host "[INFO] ~/.ragnarok not yet initialized — run 'rag doctor' to initialize" -ForegroundColor Yellow
 }
 
-# Summary
-Write-Host "`n═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+# ─── Summary ──────────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "  VERIFICATION SUMMARY" -ForegroundColor White
 Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  Tests passed: $testsPassed" -ForegroundColor Green
-Write-Host "  Tests failed: $testsFailed" -ForegroundColor $(if ($testsFailed -eq 0) { "Green" } else { "Red" })
+Write-Host "  Tests passed: $passed" -ForegroundColor Green
+Write-Host "  Tests failed: $failed" -ForegroundColor $(if ($failed -eq 0) { "Green" } else { "Red" })
 
-if ($testsFailed -eq 0) {
+if ($failed -eq 0) {
     Write-Host "`n  ✓ Installation verified successfully!" -ForegroundColor Green
-    Write-Host "`n  Next: Run 'rag serve' to start the ecosystem" -ForegroundColor White
+    Write-Host "`n  Next: Run 'rag --help' to see all commands" -ForegroundColor White
     exit 0
 } else {
-    Write-Host "`n  ✗ Some tests failed. Re-run installer or check configuration." -ForegroundColor Yellow
-    exit 1
+    Write-Host "`n  ✗ Some checks failed. Re-run 'rag doctor' or the installer." -ForegroundColor Yellow
+    exit $failed
 }

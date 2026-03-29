@@ -832,16 +832,20 @@ func runSetup(agent string) {
 		fmt.Println("Ragnarok Setup - Configure MCP for AI agents")
 		fmt.Println(strings.Repeat("─", 50))
 		fmt.Println("Available agents:")
-		fmt.Println("  rag setup opencode      Configure OpenCode")
-		fmt.Println("  rag setup cursor        Configure Cursor")
-		fmt.Println("  rag setup windsurf     Configure Windsurf")
-		fmt.Println("  rag setup antigravity  Configure Antigravity")
+		fmt.Println("  rag setup all         Detect and configure all installed IDEs")
+		fmt.Println("  rag setup opencode    Configure OpenCode")
+		fmt.Println("  rag setup cursor      Configure Cursor")
+		fmt.Println("  rag setup windsurf    Configure Windsurf")
+		fmt.Println("  rag setup claude      Configure Claude Code")
+		fmt.Println("  rag setup gemini      Configure Gemini CLI")
 		fmt.Println("")
-		fmt.Println("Example: rag setup opencode")
+		fmt.Println("Example: rag setup all")
 		return
 	}
 
 	switch strings.ToLower(agent) {
+	case "all":
+		setupAll()
 	case "opencode":
 		setupOpenCode()
 	case "cursor":
@@ -854,7 +858,70 @@ func runSetup(agent string) {
 		setupGemini()
 	default:
 		fmt.Printf("Unknown agent: %s\n", agent)
-		fmt.Println("Available: opencode, cursor, windsurf, claude, gemini")
+		fmt.Println("Available: all, opencode, cursor, windsurf, claude, gemini")
+	}
+}
+
+func setupAll() {
+	fmt.Println("Ragnarok Setup - Configuring all detected IDEs...")
+	fmt.Println(strings.Repeat("─", 50))
+	configured := 0
+
+	home, _ := os.UserHomeDir()
+
+	// OpenCode — check multiple config locations
+	opencodeLocations := []string{
+		filepath.Join(home, ".config", "opencode"),
+		filepath.Join(os.Getenv("APPDATA"), "opencode"),
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "opencode"),
+	}
+	for _, dir := range opencodeLocations {
+		if _, err := os.Stat(dir); err == nil {
+			fmt.Print("  OpenCode: ")
+			setupOpenCode()
+			configured++
+			break
+		}
+	}
+
+	// Cursor
+	cursorConfig := filepath.Join(home, ".cursor")
+	if _, err := os.Stat(cursorConfig); err == nil {
+		fmt.Print("  Cursor: ")
+		setupCursor()
+		configured++
+	}
+
+	// Windsurf
+	windsurfConfig := filepath.Join(home, ".windsurf")
+	if _, err := os.Stat(windsurfConfig); err == nil {
+		fmt.Print("  Windsurf: ")
+		setupWindsurf()
+		configured++
+	}
+
+	// Claude Code
+	claudeConfig := filepath.Join(home, ".claude")
+	if _, err := os.Stat(claudeConfig); err == nil {
+		fmt.Print("  Claude Code: ")
+		setupClaude()
+		configured++
+	}
+
+	// Gemini CLI
+	geminiConfig := filepath.Join(home, ".gemini")
+	if _, err := os.Stat(geminiConfig); err == nil {
+		fmt.Print("  Gemini CLI: ")
+		setupGemini()
+		configured++
+	}
+
+	fmt.Println(strings.Repeat("─", 50))
+	if configured == 0 {
+		fmt.Println("No supported IDEs detected.")
+		fmt.Println("Run 'rag setup <ide>' after installing an IDE.")
+	} else {
+		fmt.Printf("✓ Configured %d IDE(s). Restart them to enable Ragnarok MCP.\n", configured)
 	}
 }
 

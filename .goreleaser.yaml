@@ -11,7 +11,10 @@ builds:
     main: ./cmd/rag
     binary: rag
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
     env:
       - CGO_ENABLED=0
     goos:
@@ -29,13 +32,15 @@ archives:
   - id: rag
     builds:
       - rag
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "ragnarok_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
         format: zip
     files:
       - README.md
       - LICENSE
+      - AGENTS.md
+      - CHANGELOG.md
 
 checksum:
   name_template: "checksums.txt"
@@ -45,4 +50,4 @@ release:
   github:
     owner: andragon31
     name: Ragnarok
-  name_template: "Ragnarok v{{.Version}}"
+  name_template: "Ragnarok v{{ .Version }}"

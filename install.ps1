@@ -128,15 +128,26 @@ if ($LASTEXITCODE -eq 0 -and $ragVersion) {
     Write-Err "Verification failed"
 }
 
+Write-Step "6. Configuring IDEs"
+
+$ragSetupPath = Join-Path $InstallDir "rag.exe"
+try {
+    & $ragSetupPath setup all 2>$null
+    Write-Success "IDE MCP configuration updated"
+} catch {
+    Write-Warn "Could not auto-configure IDEs. Run 'rag setup all' manually."
+}
+
 Write-Host "`n---------------------------------------------------------------" -ForegroundColor Cyan
 Write-Host "  INSTALLATION COMPLETE!" -ForegroundColor Green
 Write-Host "---------------------------------------------------------------`n" -ForegroundColor Cyan
 
 Write-Host "Usage:" -ForegroundColor White
-Write-Host "  rag init --project NAME    Initialize plugins for a project" -ForegroundColor Yellow
-Write-Host "  rag scan --path ./project   Scan and bootstrap a project" -ForegroundColor Yellow
-Write-Host "  rag setup opencode         Re-configure OpenCode MCP" -ForegroundColor Yellow
-Write-Host "  rag --help                 Show all commands" -ForegroundColor Yellow
+Write-Host "  rag new --project NAME --path ./dir   Create new project" -ForegroundColor Yellow
+Write-Host "  rag continue --plan ID                Resume development" -ForegroundColor Yellow
+Write-Host "  rag setup all                         Re-configure all IDEs" -ForegroundColor Yellow
+Write-Host "  rag doctor                            Health check" -ForegroundColor Yellow
+Write-Host "  rag --help                            Show all commands" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Documentation: https://github.com/$REPO" -ForegroundColor Gray
 Write-Host ""

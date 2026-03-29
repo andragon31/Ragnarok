@@ -273,9 +273,59 @@ graph TD
 
 ## Instalación
 
+### Windows
+
 ```powershell
-# Install v2.2.4 (actual)
-irm https://raw.githubusercontent.com/andragon31/Ragnarok/v2.2.4/install.ps1 | iex
+# Instalación rápida (detecta la última versión automáticamente)
+irm https://raw.githubusercontent.com/andragon31/Ragnarok/main/install_quick.ps1 | iex
+```
+
+### Linux / macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/andragon31/Ragnarok/main/install.sh | bash
+```
+
+---
+
+## IDE Setup
+
+Ragnarok funciona con cualquier cliente MCP. Después de instalar, ejecuta:
+
+```bash
+rag setup all   # Detecta y configura todos los IDEs instalados
+```
+
+O configura manualmente:
+
+### OpenCode
+Agrega a `~/.config/opencode/opencode.json`:
+```json
+{ "mcp": { "ragnarok": { "type": "local", "command": ["rag", "mcp"], "enabled": true } } }
+```
+
+### Claude Code
+Agrega a `~/.claude/settings.json`:
+```json
+{ "mcpServers": { "ragnarok": { "command": "rag", "args": ["mcp"] } } }
+```
+
+### Cursor
+Agrega a `.cursor/mcp.json` en tu proyecto:
+```json
+{ "mcpServers": { "ragnarok": { "command": "rag", "args": ["mcp"] } } }
+```
+
+### Windsurf
+Agrega a `~/.windsurf/mcp.json`:
+```json
+{ "mcpServers": { "ragnarok": { "command": "rag", "args": ["mcp"] } } }
+```
+
+### Gemini CLI
+Agrega a `~/.gemini/settings.json`:
+```json
+{ "mcpServers": { "ragnarok": { "command": "rag", "args": ["mcp"] } } }
 ```
 
 ---
@@ -312,42 +362,32 @@ rag serve
 
 ## Changelog
 
-### v2.1.0 (Latest)
-**Simplified Commands:**
-- Nuevo CLI: `rag new`, `rag continue`, `rag feature`, `rag review`, `rag status`
-- Agregados métodos `ExecuteWorkflow` y `CallTool` en unified server
-- Comandos simplificados para uso directo por agentes
+### v2.2.4 (Latest)
+- CI/CD pipeline con GitHub Actions (`ci.yml`, `release.yml`)
+- Release automation con GoReleaser (cross-platform binaries)
+- Instalador Linux/macOS (`install.sh`)
+- `verify_install.ps1` reescrito para arquitectura unificada
+- `rag setup claude`, `rag setup cursor`, `rag setup windsurf`, `rag setup gemini`
+- `CHANGELOG.md` y `CONTRIBUTING.md` agregados
+- `go.work` eliminado (proyecto single-module)
 
-**Funciones Eliminadas (44 total):**
-- Hati: `plan_lock`, `plan_unlock`, `plan_quality`, `plan_completeness`, `plan_recover`, `plan_restart`, `checkpoint_decide`, `checkpoint_status`, `checkpoint_escalate`, `checkpoint_check_sla`, `checkpoint_set_sla`, `feedback_request`, `feedback_receive`, `feedback_escalate`, `notification_ack`, `record_list`, `record_get`, `record_export`, `module_hints`, `learning_answer`
-- Fenrir: `bias_report`, `intent_save`, `intent_get`, `intent_verify`, `incident_log`, `incident_list`, `incident_resolve`, `conflict_list`, `conflict_resolve`
-- Skoll: `workflow_start`, `workflow_step`, `workflow_status`, `workflow_complete`, `workflow_deprecate`, `rule_pending`, `rule_promote`, `api_docs_check`, `dod_check`
-- Tyr: `audit_log`, `session_audit`, `inject_guard`, `proactive_scan`, `sanitize`, `scope_violations`
+### v2.2.x
+- Arquitectura unificada: único binario `rag` expone todos los módulos via MCP
+- `rag setup opencode/cursor/windsurf/claude/gemini`
+- Corrección URL `install_quick.ps1` (apuntaba a org inexistente)
+- `opencode.json` usando `rag` desde PATH (sin path hardcodeado)
+- Runtime dirs eliminados del tracking git (`.ragnarok/`, `.skoll/`, `.tyr/`)
 
-### v2.0.6
-- Schema validation tests para Hati, Skoll, Fenrir, Tyr
-- Fix: `columnExists()` en migration para SQLite más antiguo
+### v2.1.0
+- Nuevo CLI unificado: `rag new`, `rag continue`, `rag feature`, `rag review`, `rag status`
+- Métodos `ExecuteWorkflow` y `CallTool` en unified server
+- 44 funciones MCP consolidadas en sistema de workflows
 
-### v2.0.3
-- Fix multi-digit phase numbers bug (strconv.Itoa vs rune)
-- Add thread-safety (sync.Mutex) to generateID in all modules
-- Fix DB error ignored in Hati plan_recover handler
-- Implement standard_run_all (was stub returning zeros)
-- Add PRAGMA foreign_keys = ON to all databases
-- Add 30s timeout to MCP handler calls
+### v2.0.x
+- Arquitectura multi-módulo (4 módulos SQLite independientes)
+- Fix multi-digit phase numbers bug
+- Thread-safety en generateID
+- `standard_run_all` implementado (era stub)
+- Schema validation tests
 
-### v2.0.1
-- Multi-Agent Tasks: tasks can have multiple agents assigned
-- Agent-Based Orchestration: Skoll delegates directly to agents
-- Task Executions: granular tracking per execution
-- workflow_stack_based_init: auto-detects project stack
-- workflow_plan_develop_v2: multi-agent task delegation
-
-### v1.4.x
-- Initial stable release with 4-module architecture
-- Human-in-the-loop checkpoints
-- Basic agent registration and work tracking
-
----
-
-**v2.1.0** - Simplified Commands for Agent Workflows
+[Ver CHANGELOG completo](./CHANGELOG.md)
