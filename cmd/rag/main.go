@@ -40,6 +40,9 @@ func toInt(v interface{}) int {
 		return int(val)
 	case int64:
 		return int(val)
+	case bool:
+		if val { return 1 }
+		return 0
 	case string:
 		i, _ := strconv.Atoi(val)
 		return i
@@ -1912,9 +1915,9 @@ func printWorkflowResult(workflow string, result interface{}) {
 			if !ok {
 				continue
 			}
-			id := tm["id"].(string)
-			title := tm["title"].(string)
-			status := tm["status"].(string)
+			id, _ := tm["id"].(string)
+			title, _ := tm["title"].(string)
+			status, _ := tm["status"].(string)
 			
 			icon := "○"
 			if status == "completed" {
@@ -1960,8 +1963,8 @@ func printWorkflowResult(workflow string, result interface{}) {
 				} else if status == "in_progress" {
 					icon = "▶"
 				}
-
-				fmt.Printf("   %s [%s] %s\n", icon, status, name)
+				
+				fmt.Printf("   %s [%-14s] %s\n", icon, status, name)
 				if out, ok := sm["output"].(string); ok && out != "" {
 					fmt.Printf("      Output: %s\n", out)
 				}
