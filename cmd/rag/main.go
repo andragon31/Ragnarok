@@ -25,7 +25,7 @@ import (
 	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
-var version = "2.3.5"
+var version = "2.3.6"
 
 func toInt(v interface{}) int {
 	if v == nil {
@@ -1872,17 +1872,79 @@ func getActivePlanID() string {
 
 func printWorkflowResult(workflow string, result interface{}) {
 	if result == nil {
+		fmt.Println("   (No result data)")
 		return
 	}
-	if m, ok := result.(map[string]interface{}); ok {
-		if status, ok := m["status"].(string); ok {
-			fmt.Printf("Status: %s\n", status)
+
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		fmt.Printf("   Result: %v\n", result)
+		return
+	}
+
+	// General fields
+	if status, ok := m["status"].(string); ok {
+		fmt.Printf("   Status: %s\n", status)
+	}
+	if msg, ok := m["message"].(string); ok && msg != "" {
+		fmt.Printf("   Message: %s\n", msg)
+	}
+
+	// Specific workflow handling
+	switch workflow {
+	case "progress":
+		total := toInt(m["total_tasks"])
+		done := toInt(m["completed_tasks"])
+		perc := m["progress_percent"].(string)
+		fmt.Printf("   Progress: %s (%d/%d tasks)\n", perc, done, total)
+		if phases := toInt(m["phase_count"]); phases > 0 {
+			donePhases := toInt(m["completed_phases"])
+			fmt.Printf("   Phases:   %d/%d phases completed\n", donePhases, phases)
 		}
-		if msg, ok := m["message"].(string); ok && msg != "" {
-			fmt.Printf("Message: %s\n", msg)
+
+	case "tasks":
+		tasks, _ := m["tasks"].([]interface{})
+		if len(tasks) == 0 {
+			fmt.Println("   (No tasks found)")
 		}
+		for _, t := range tasks {
+			tm, ok := t.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			id := tm["id"].(string)
+			title := tm["title"].(string)
+			status := tm["status"].(string)
+			
+			icon := "○"
+			if status == "completed" {
+				icon = "✓"
+			} else if status == "in_progress" {
+				icon = "▶"
+			} else if status == "blocked" {
+				icon = "⚠"
+			}
+
+			fmt.Printf("   %s [%s] %s\n", icon, id, title)
+		}
+
+	case "diagnose":
+		if healthy, ok := m["healthy"].(bool); ok {
+			status := "Healthy"
+			if !healthy { status = "Unhealthy" }
+			fmt.Printf("   System Status: %s\n", status)
+		}
+		if issues, ok := m["issues"].([]interface{}); ok && len(issues) > 0 {
+			fmt.Printf("   Issues found: %d\n", len(issues))
+			for _, iss := range issues {
+				fmt.Printf("     - %s\n", iss)
+			}
+		}
+
+	default:
+		// Generic steps print
 		if steps, ok := m["steps"].([]interface{}); ok {
-			fmt.Printf("Steps completed: %d\n", len(steps))
+			fmt.Printf("   Steps completed: %d\n", len(steps))
 		}
 	}
 }
