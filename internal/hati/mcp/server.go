@@ -83,6 +83,10 @@ func (s *Server) registerHandlers() {
 	s.handlers["human_review_create"] = s.handleHumanReviewCreate
 	s.handlers["human_review_decide"] = s.handleHumanReviewDecide
 	s.handlers["human_review_pending"] = s.handleHumanReviewPending
+
+	// C-1 fix: task_assign_agents was called by workflows but never registered
+	s.handlers["task_assign_agents"] = s.handleTaskAssignAgents
+	s.handlers["task_set_blocker"]   = s.handleTaskSetBlocker
 }
 
 func (s *Server) HandleRequest(ctx context.Context, raw []byte) ([]byte, error) {

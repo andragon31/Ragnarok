@@ -120,6 +120,14 @@ func (s *Server) registerHandlers() {
 	s.handlers["skills_import"] = s.handleSkillsImport
 	s.handlers["skills_update"] = s.handleSkillsUpdate
 	s.handlers["bootstrap_import"] = s.handleBootstrapImport
+
+	// Task execution handlers (C-2 fix: were implemented but not registered)
+	s.handlers["task_execute"]   = s.handleTaskExecute
+	s.handlers["task_delegate"]  = s.handleTaskDelegate
+	s.handlers["task_status"]    = s.handleTaskStatus
+	s.handlers["task_heartbeat"] = s.handleTaskHeartbeat
+	s.handlers["task_complete"]  = s.handleTaskComplete
+	s.handlers["task_cancel"]    = s.handleTaskCancel
 }
 
 func (s *Server) HandleRequest(ctx context.Context, raw []byte) ([]byte, error) {

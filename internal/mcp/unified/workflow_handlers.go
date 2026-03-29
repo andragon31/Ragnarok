@@ -392,8 +392,10 @@ func (s *Server) handleWorkflowSessionStart(ctx context.Context, req *Request) (
 		status := "success"
 		if err != nil {
 			status = "error"
+			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
+		} else {
+			steps = append(steps, WorkflowStep{Name: name, Status: status, Output: out})
 		}
-		steps = append(steps, WorkflowStep{Name: name, Status: status, Output: out, Error: err.Error()})
 		results[name] = out
 	}
 
