@@ -95,7 +95,7 @@ Gestión de planes de desarrollo, fases, tareas y validaciones humanas.
 
 **Tablas principales:** `plans`, `phases`, `tasks`, `task_agents`, `checkpoints`, `human_reviews`, `notifications`
 
-### Funciones: `plan_create`, `plan_get`, `plan_list`, `plan_complete`, `plan_abandon`, `plan_resume`, `plan_revise`, `plan_blockers`, `plan_dependencies`, `phase_create`, `phase_update`, `phase_start`, `phase_report`, `task_create`, `task_get`, `task_get_next`, `task_update`, `task_list`, `checkpoint_open`, `checkpoint_approve`, `human_review_create`, `human_review_decide`, `human_review_pending`, `notification_send`, `notification_list`, `spec_impact`, `quality_snapshot`, `prd_parse`, `prd_requirements_extract`
+### Funciones: `plan_create`, `plan_get`, `plan_list`, `plan_complete`, `plan_abandon`, `plan_resume`, `plan_revise`, `plan_blockers`, `plan_dependencies`, `phase_create`, `phase_update`, `task_create`, `task_get`, `task_get_next`, `task_update`, `task_list`, `checkpoint_open`, `checkpoint_approve`, `human_review_create`, `human_review_decide`, `human_review_pending`, `notification_send`, `notification_list`, `spec_impact`, `quality_snapshot`, `prd_parse`, `prd_requirements_extract`
 
 ---
 
@@ -318,11 +318,11 @@ rag serve
 - Agregados métodos `ExecuteWorkflow` y `CallTool` en unified server
 - Comandos simplificados para uso directo por agentes
 
-**Funciones Eliminadas (59 total):**
-- Hati: `plan_lock`, `plan_unlock`, `plan_quality`, `plan_completeness`, `plan_recover`, `plan_restart`, `checkpoint_decide`, `checkpoint_status`, `checkpoint_escalate`, `checkpoint_check_sla`, `checkpoint_set_sla`, `feedback_request`, `feedback_receive`, `feedback_escalate`, `notification_ack`, `record_list`, `record_get`, `record_export`, `module_hints`, `learning_answer`, `hati_status`, `hati_stats`, `hati_commit_info`, `hati_register_commit`, `agent_register_work`, `agent_unregister_work`, `agent_list_work`
+**Funciones Eliminadas (44 total):**
+- Hati: `plan_lock`, `plan_unlock`, `plan_quality`, `plan_completeness`, `plan_recover`, `plan_restart`, `checkpoint_decide`, `checkpoint_status`, `checkpoint_escalate`, `checkpoint_check_sla`, `checkpoint_set_sla`, `feedback_request`, `feedback_receive`, `feedback_escalate`, `notification_ack`, `record_list`, `record_get`, `record_export`, `module_hints`, `learning_answer`
 - Fenrir: `bias_report`, `intent_save`, `intent_get`, `intent_verify`, `incident_log`, `incident_list`, `incident_resolve`, `conflict_list`, `conflict_resolve`
-- Skoll: `workflow_start`, `workflow_step`, `workflow_status`, `workflow_complete`, `workflow_deprecate`, `task_execute`, `task_delegate`, `task_status`, `task_heartbeat`, `task_complete`, `task_cancel`, `rule_pending`, `rule_promote`, `team_status`, `team_register`, `api_docs_check`, `dod_check`
-- Tyr: `audit_log`, `session_audit`, `inject_guard`, `proactive_scan`, `sanitize`, `scope_violations`, `tyr_stats`
+- Skoll: `workflow_start`, `workflow_step`, `workflow_status`, `workflow_complete`, `workflow_deprecate`, `rule_pending`, `rule_promote`, `api_docs_check`, `dod_check`
+- Tyr: `audit_log`, `session_audit`, `inject_guard`, `proactive_scan`, `sanitize`, `scope_violations`
 
 ### v2.0.6
 - Schema validation tests para Hati, Skoll, Fenrir, Tyr
