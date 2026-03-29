@@ -82,7 +82,9 @@ try {
 
 Write-Step "2. Verifying checksum"
 
-$checksums = (Invoke-RestMethod -Uri $CHECKSUM_URL -UseBasicParsing).Content
+$webClient = New-Object System.Net.WebClient
+$checksums = $webClient.DownloadString($CHECKSUM_URL)
+$webClient.Dispose()
 $assetEscaped = [regex]::Escape($ASSET)
 $checksumLine = $checksums.Split([char]0x0A) | Where-Object { $_.Trim([char]0x0D) -match "^\s*([a-fA-F0-9]+)\s+${assetEscaped}\s*$" }
 if (-not $checksumLine) {
