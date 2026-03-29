@@ -981,57 +981,116 @@ func setupOpenCode() {
 		fmt.Printf("Error finding rag.exe: %v\n", err)
 		os.Exit(1)
 	}
-
-	configs := []struct {
-		dir  string
-		sub  string
-		file string
-	}{
-		{os.Getenv("USERPROFILE"), ".config/opencode", ".mcp.json"},
-		{os.Getenv("APPDATA"), "opencode", ".mcp.json"},
-		{os.Getenv("APPDATA"), "OpenCode", ".mcp.json"},
-		{os.Getenv("LOCALAPPDATA"), "opencode", ".mcp.json"},
+	if resolved, err := filepath.EvalSymlinks(ragPath); err == nil {
+		ragPath = resolved
 	}
 
-	mcpConfig := map[string]interface{}{
-		"mcpServers": map[string]interface{}{
-			"ragnarok": map[string]interface{}{
-				"type":    "local",
-				"command": []string{ragPath, "mcp"},
-				"enabled": true,
-			},
-		},
+	configDir := openCodeConfigDir()
+	os.MkdirAll(configDir, 0755)
+
+	configPath := openCodeConfigPath()
+
+	var existingConfig map[string]json.RawMessage
+	if data, err := os.ReadFile(configPath); err == nil {
+		cleaned := stripJSONC(data)
+		json.Unmarshal(cleaned, &existingConfig)
+	} else if !os.IsNotExist(err) {
+		fmt.Printf("Warning: could not read config: %v\n", err)
 	}
 
-	updated := 0
-	for _, cfg := range configs {
-		if cfg.dir == "" {
+	if existingConfig == nil {
+		existingConfig = make(map[string]json.RawMessage)
+	}
+
+	var mcpBlock map[string]json.RawMessage
+	if raw, exists := existingConfig["mcp"]; exists {
+		json.Unmarshal(raw, &mcpBlock)
+	}
+	if mcpBlock == nil {
+		mcpBlock = make(map[string]json.RawMessage)
+	}
+
+	if _, exists := mcpBlock["ragnarok"]; !exists {
+		engramEntry := map[string]interface{}{
+			"type":    "local",
+			"command": []string{ragPath, "mcp"},
+			"enabled": true,
+		}
+		entryJSON, _ := json.Marshal(engramEntry)
+		mcpBlock["ragnarok"] = json.RawMessage(entryJSON)
+	}
+
+	mcpJSON, _ := json.Marshal(mcpBlock)
+	existingConfig["mcp"] = json.RawMessage(mcpJSON)
+
+	output, _ := json.MarshalIndent(existingConfig, "", "  ")
+	os.WriteFile(configPath, output, 0644)
+
+	fmt.Printf("✓ OpenCode configured: %s\n", configPath)
+	fmt.Println("  Restart OpenCode to use Ragnarok MCP")
+}
+
+func openCodeConfigDir() string {
+	home, _ := os.UserHomeDir()
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "opencode")
+	}
+	return filepath.Join(home, ".config", "opencode")
+}
+
+func openCodeConfigPath() string {
+	dir := openCodeConfigDir()
+	jsonc := filepath.Join(dir, "opencode.jsonc")
+	if _, err := os.Stat(jsonc); err == nil {
+		return jsonc
+	}
+	return filepath.Join(dir, "opencode.json")
+}
+
+func stripJSONC(data []byte) []byte {
+	var out []byte
+	i := 0
+	for i < len(data) {
+		if data[i] == '"' {
+			out = append(out, data[i])
+			i++
+			for i < len(data) && data[i] != '"' {
+				if data[i] == '\\' && i+1 < len(data) {
+					out = append(out, data[i], data[i+1])
+					i += 2
+					continue
+				}
+				out = append(out, data[i])
+				i++
+			}
+			if i < len(data) {
+				out = append(out, data[i])
+				i++
+			}
 			continue
 		}
-		configDir := filepath.Join(cfg.dir, cfg.sub)
-		configPath := filepath.Join(configDir, cfg.file)
-
-		os.MkdirAll(configDir, 0755)
-
-		var existingConfig map[string]interface{}
-		if data, err := os.ReadFile(configPath); err == nil {
-			json.Unmarshal(data, &existingConfig)
-		}
-
-		if existingConfig != nil {
-			if mcpServers, ok := existingConfig["mcpServers"].(map[string]interface{}); ok {
-				mcpServers["ragnarok"] = mcpConfig["mcpServers"].(map[string]interface{})["ragnarok"]
-				mcpConfig = existingConfig
+		if i+1 < len(data) && data[i] == '/' && data[i+1] == '/' {
+			for i < len(data) && data[i] != '\n' {
+				i++
 			}
+			continue
 		}
-
-		data, _ := json.MarshalIndent(mcpConfig, "", "  ")
-		os.WriteFile(configPath, data, 0644)
-		updated++
+		if i+1 < len(data) && data[i] == '/' && data[i+1] == '*' {
+			i += 2
+			for i+1 < len(data) && !(data[i] == '*' && data[i+1] == '/') {
+				i++
+			}
+			if i+1 < len(data) {
+				i += 2
+			} else {
+				i = len(data)
+			}
+			continue
+		}
+		out = append(out, data[i])
+		i++
 	}
-
-	fmt.Printf("✓ OpenCode configured: %d config files updated\n", updated)
-	fmt.Println("  Restart OpenCode to use Ragnarok MCP")
+	return out
 }
 
 func setupCursor() {
