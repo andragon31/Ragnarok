@@ -146,7 +146,7 @@ func TestImportRecordSQLGeneration(t *testing.T) {
 
 func TestExportDataStructure(t *testing.T) {
 	exportData := map[string]interface{}{
-		"version":     "2.2.2",
+		"version":     version,
 		"exported_at": "2026-03-28T00:00:00Z",
 		"plugins": map[string]interface{}{
 			"fenrir": map[string]interface{}{
