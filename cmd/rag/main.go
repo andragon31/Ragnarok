@@ -229,8 +229,7 @@ func main() {
 		runUnifiedMCP(*mcpDir)
 	case "bootstrap":
 		bootstrapCmd.Parse(os.Args[2:])
-		if *bootstrapPRD == "" && len(os.Args) > 2 {
-			// Direct usage: rag bootstrap PRD.md
+		if *bootstrapPRD == "" && len(os.Args) > 2 && !strings.HasPrefix(os.Args[2], "-") {
 			*bootstrapPRD = os.Args[2]
 		}
 		runBootstrap(*bootstrapPRD, *bootstrapPath)
