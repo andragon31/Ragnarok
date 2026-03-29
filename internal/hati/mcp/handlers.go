@@ -168,7 +168,12 @@ func (s *Server) handlePlanRevise(ctx context.Context, req *Request) (*Response,
 		return nil, fmt.Errorf("plan_id is required")
 	}
 
-	var currentPlan Plan
+	var currentPlan struct {
+		ID          string
+		Title       sql.NullString
+		Description sql.NullString
+		Status      string
+	}
 	query := `SELECT id, title, description, status FROM plans WHERE id = ?`
 	err := s.db.QueryRow(query, params.PlanID).Scan(&currentPlan.ID, &currentPlan.Title, &currentPlan.Description, &currentPlan.Status)
 	if err == sql.ErrNoRows {
@@ -183,10 +188,10 @@ func (s *Server) handlePlanRevise(ctx context.Context, req *Request) (*Response,
 	}
 
 	var changesSummary string
-	if params.Title != "" && params.Title != currentPlan.Title {
-		changesSummary += fmt.Sprintf("title: '%s' -> '%s'; ", currentPlan.Title, params.Title)
+	if params.Title != "" && params.Title != currentPlan.Title.String {
+		changesSummary += fmt.Sprintf("title: '%s' -> '%s'; ", currentPlan.Title.String, params.Title)
 	}
-	if params.Description != "" && params.Description != currentPlan.Description {
+	if params.Description != "" && params.Description != currentPlan.Description.String {
 		changesSummary += fmt.Sprintf("description updated; ")
 	}
 	if len(params.NewPhases) > 0 {

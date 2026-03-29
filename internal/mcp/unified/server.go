@@ -658,21 +658,61 @@ func (s *Server) Run(ctx context.Context) error {
 							}
 						} else {
 							// Use a timeout for handlers to prevent blocking the pipe indefinitely
-							handlerCtx, cancel := context.WithTimeout(ctx, 300*time.Second) // Increased to 5 min for workflows
+							handlerCtx, cancel := context.WithTimeout(ctx, 300*time.Second) 
 							defer cancel()
-							result, err := handler(handlerCtx, &req)
-							if err != nil {
-								log.Printf("Handler error for %s: %v", baseReq.Method, err)
+							
+							// Channel to receive the result from the handler goroutine
+							type handlerResult struct {
+								result interface{}
+								err    error
+							}
+							resultChan := make(chan handlerResult, 1)
+							
+							go func() {
+								res, err := handler(handlerCtx, &req)
+								resultChan <- handlerResult{res, err}
+							}()
+							
+							// Periodic progress notifications to keep the IDE connection alive
+							ticker := time.NewTicker(2 * time.Second)
+							defer ticker.Stop()
+							
+							var hRes handlerResult
+							finished := false
+							
+							for !finished {
+								select {
+								case hRes = <-resultChan:
+									finished = true
+								case <-ticker.C:
+									// Send progress notification (empty but keeps the pipe active)
+									progressNotif := map[string]interface{}{
+										"jsonrpc": "2.0",
+										"method":  "notifications/progress",
+										"params": map[string]interface{}{
+											"progressToken": fmt.Sprintf("job-%v", baseReq.ID),
+											"progress":      0, // We don't have real progress %, but we keep the connection alive
+										},
+									}
+									encoder.Encode(progressNotif)
+								case <-handlerCtx.Done():
+									hRes = handlerResult{nil, handlerCtx.Err()}
+									finished = true
+								}
+							}
+
+							if hRes.err != nil {
+								log.Printf("Handler error for %s: %v", baseReq.Method, hRes.err)
 								resp = map[string]interface{}{
 									"jsonrpc": "2.0",
 									"id":      baseReq.ID,
-									"error":   map[string]string{"code": "-32603", "message": "Internal error: " + err.Error()},
+									"error":   map[string]string{"code": "-32603", "message": "Internal error: " + hRes.err.Error()},
 								}
 							} else {
 								resp = map[string]interface{}{
 									"jsonrpc": "2.0",
 									"id":      baseReq.ID,
-									"result":  result,
+									"result":  hRes.result,
 								}
 							}
 						}
