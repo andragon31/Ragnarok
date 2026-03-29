@@ -637,7 +637,7 @@ Usage:
   rag install --project NAME [--mcp]     Install Ragnarok
   rag serve                              Start unified MCP server (stdio)
   rag mcp                                Alias for serve
-	rag setup --agent AGENT                Setup MCP for agent (opencode, cursor, windsurf)
+	rag setup --agent AGENT                Setup MCP for agent (opencode, cursor, windsurf, claude, gemini)
   rag reset                              Reset all databases (DANGER!)
   rag reinstall                          Complete reinstall from scratch (DANGER!)
   rag version                            Show version
@@ -665,7 +665,8 @@ Quick Setup:
   rag setup opencode     Configure OpenCode (most common)
   rag setup cursor       Configure Cursor
   rag setup windsurf     Configure Windsurf
-  rag setup antigravity  Configure Antigravity`)
+  rag setup claude       Configure Claude Code
+  rag setup gemini       Configure Gemini CLI`)
 }
 
 func runInit(projectName, baseDir string) {
@@ -847,11 +848,13 @@ func runSetup(agent string) {
 		setupCursor()
 	case "windsurf":
 		setupWindsurf()
-	case "antigravity":
-		setupAntigravity()
+	case "claude":
+		setupClaude()
+	case "gemini":
+		setupGemini()
 	default:
 		fmt.Printf("Unknown agent: %s\n", agent)
-		fmt.Println("Available: opencode, cursor, windsurf, antigravity")
+		fmt.Println("Available: opencode, cursor, windsurf, claude, gemini")
 	}
 }
 
@@ -970,8 +973,8 @@ func setupWindsurf() {
 	fmt.Println("  Restart Windsurf to use Ragnarok MCP")
 }
 
-func setupAntigravity() {
-	fmt.Println("Setting up Ragnarok for Antigravity...")
+func setupClaude() {
+	fmt.Println("Setting up Ragnarok for Claude Code...")
 
 	ragPath, err := os.Executable()
 	if err != nil {
@@ -980,7 +983,7 @@ func setupAntigravity() {
 	}
 
 	home, _ := os.UserHomeDir()
-	configPath := filepath.Join(home, ".gemini", "antigravity", "mcp_config.json")
+	configPath := filepath.Join(home, ".claude", "settings.json")
 	os.MkdirAll(filepath.Dir(configPath), 0755)
 
 	mcpConfig := map[string]interface{}{
@@ -994,8 +997,36 @@ func setupAntigravity() {
 	data, _ := json.MarshalIndent(mcpConfig, "", "  ")
 	os.WriteFile(configPath, data, 0644)
 
-	fmt.Printf("✓ Antigravity configured: %s\n", configPath)
-	fmt.Println("  Restart Antigravity to use Ragnarok MCP")
+	fmt.Printf("✓ Claude Code configured: %s\n", configPath)
+	fmt.Println("  Restart Claude Code to use Ragnarok MCP")
+}
+
+func setupGemini() {
+	fmt.Println("Setting up Ragnarok for Gemini CLI...")
+
+	ragPath, err := os.Executable()
+	if err != nil {
+		fmt.Printf("Error finding rag.exe: %v\n", err)
+		os.Exit(1)
+	}
+
+	home, _ := os.UserHomeDir()
+	configPath := filepath.Join(home, ".gemini", "settings.json")
+	os.MkdirAll(filepath.Dir(configPath), 0755)
+
+	mcpConfig := map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			"ragnarok": map[string]interface{}{
+				"command": []string{ragPath, "mcp"},
+			},
+		},
+	}
+
+	data, _ := json.MarshalIndent(mcpConfig, "", "  ")
+	os.WriteFile(configPath, data, 0644)
+
+	fmt.Printf("✓ Gemini CLI configured: %s\n", configPath)
+	fmt.Println("  Restart Gemini CLI to use Ragnarok MCP")
 }
 
 func runNewProject(projectName, projectPath, stack string) {

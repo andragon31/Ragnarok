@@ -317,6 +317,54 @@ func TestPlanComplete(t *testing.T) {
 	}
 }
 
+func TestPhaseCreateAndList(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	planParams := map[string]interface{}{
+		"title": "Multi-Phase Project",
+	}
+	planParamsJSON := marshalParams(planParams)
+	planReq := &Request{
+		Method: "plan_create",
+		Params: planParamsJSON,
+	}
+
+	planResult, err := srv.handlers["plan_create"](ctx, planReq)
+	if err != nil {
+		t.Fatalf("plan_create failed: %v", err)
+	}
+	planResultMap := planResult.Result.(map[string]interface{})
+	planID := planResultMap["id"].(string)
+
+	phaseParams := map[string]interface{}{
+		"plan_id": planID,
+		"title":   "Phase 1 - Setup",
+	}
+	phaseParamsJSON := marshalParams(phaseParams)
+	phaseReq := &Request{
+		Method: "phase_create",
+		Params: phaseParamsJSON,
+	}
+
+	phaseResult, err := srv.handlers["phase_create"](ctx, phaseReq)
+	if err != nil {
+		t.Fatalf("phase_create failed: %v", err)
+	}
+
+	phaseResultMap := phaseResult.Result.(map[string]interface{})
+	phaseID, ok := phaseResultMap["id"].(string)
+	if !ok || phaseID == "" {
+		t.Fatal("expected non-empty phase id")
+	}
+
+	if phaseResultMap["title"] != "Phase 1 - Setup" {
+		t.Errorf("expected title 'Phase 1 - Setup', got %v", phaseResultMap["title"])
+	}
+}
+
 func marshalParams(params map[string]interface{}) []byte {
 	b, _ := json.Marshal(params)
 	return b

@@ -76,6 +76,8 @@ rag version         # Versión de todos los módulos
 rag setup opencode  # Configurar OpenCode MCP
 rag setup cursor    # Configurar Cursor MCP
 rag setup windsurf  # Configurar Windsurf MCP
+rag setup claude    # Configurar Claude Code MCP
+rag setup gemini    # Configurar Gemini CLI MCP
 ```
 
 ## Configuración de IDEs
