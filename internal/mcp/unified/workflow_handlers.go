@@ -274,6 +274,14 @@ func (s *Server) handleWorkflowTeamSetupFromPRD(ctx context.Context, req *Reques
 		}
 	}
 
+	if params.ProjectPath != "" {
+		step("Fenrir: Bootstrap Project Structure", func() (interface{}, error) {
+			return s.callTool(ctx, "project_bootstrap", map[string]interface{}{
+				"project_path": params.ProjectPath,
+			})
+		})
+	}
+
 	return &Response{Result: map[string]interface{}{
 		"workflow": "team_setup_from_prd",
 		"status":   "completed",
@@ -1297,6 +1305,15 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 				return teamResult, nil
 			})
 		}
+	}
+
+	// 3b. Fenrir: Bootstrap Project Structure
+	if !shouldBreak() && params.ProjectPath != "" {
+		step("Fenrir: Bootstrap Project Structure", func() (interface{}, error) {
+			return s.callTool(ctx, "project_bootstrap", map[string]interface{}{
+				"project_path": params.ProjectPath,
+			})
+		})
 	}
 
 	// 4. Tyr: Initial Quality Scan

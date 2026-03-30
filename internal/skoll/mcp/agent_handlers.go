@@ -117,9 +117,7 @@ func (s *Server) handleAgentCreate(ctx context.Context, req *Request) (*Response
 		return nil, fmt.Errorf("unknown agent type: %s", params.Type)
 	}
 
-	agentID := generateID("agent")
 	now := time.Now()
-
 	role := agentTemplate["role"].(string)
 	scope := agentTemplate["scope"].(string)
 	skills := params.Skills
@@ -132,6 +130,25 @@ func (s *Server) handleAgentCreate(ctx context.Context, req *Request) (*Response
 	capabilitiesJSON, _ := json.Marshal(capabilities)
 
 	hasCapabilities := columnExists(s.db, "agents", "capabilities")
+
+	var existingID string
+	err := s.db.QueryRow(`SELECT id FROM agents WHERE name = ?`, params.Name).Scan(&existingID)
+	if err == nil {
+		return &Response{Result: map[string]interface{}{
+			"id":             existingID,
+			"name":           params.Name,
+			"agent_type":     params.Type,
+			"role":           role,
+			"scope":          scope,
+			"skills":         skills,
+			"capabilities":   capabilities,
+			"status":         "idle",
+			"created_at":     now,
+			"already_exists": true,
+		}}, nil
+	}
+
+	agentID := generateID("agent")
 
 	var query string
 	var args []interface{}
@@ -146,7 +163,7 @@ func (s *Server) handleAgentCreate(ctx context.Context, req *Request) (*Response
 		args = []interface{}{agentID, params.Name, role, scope, string(skillsJSON), now, now}
 	}
 
-	_, err := s.db.Exec(query, args...)
+	_, err = s.db.Exec(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
