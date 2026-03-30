@@ -91,6 +91,8 @@ func (s *Server) registerHandlers() {
 	s.handlers["rule_list"] = s.handleRuleList
 	s.handlers["rule_check"] = s.handleRuleCheck
 	s.handlers["rule_get"] = s.handleRuleGet
+	s.handlers["rule_create_or_reuse"] = s.handleRuleCreateOrReuse
+	s.handlers["rule_create_from_prd"] = s.handleRuleCreateFromPRD
 
 	s.handlers["skill_list"] = s.handleSkillList
 	s.handlers["skill_load"] = s.handleSkillLoad
@@ -122,12 +124,12 @@ func (s *Server) registerHandlers() {
 	s.handlers["bootstrap_import"] = s.handleBootstrapImport
 
 	// Task execution handlers (C-2 fix: were implemented but not registered)
-	s.handlers["task_execute"]   = s.handleTaskExecute
-	s.handlers["task_delegate"]  = s.handleTaskDelegate
-	s.handlers["task_status"]    = s.handleTaskStatus
+	s.handlers["task_execute"] = s.handleTaskExecute
+	s.handlers["task_delegate"] = s.handleTaskDelegate
+	s.handlers["task_status"] = s.handleTaskStatus
 	s.handlers["task_heartbeat"] = s.handleTaskHeartbeat
-	s.handlers["task_complete"]  = s.handleTaskComplete
-	s.handlers["task_cancel"]    = s.handleTaskCancel
+	s.handlers["task_complete"] = s.handleTaskComplete
+	s.handlers["task_cancel"] = s.handleTaskCancel
 }
 
 func (s *Server) HandleRequest(ctx context.Context, raw []byte) ([]byte, error) {

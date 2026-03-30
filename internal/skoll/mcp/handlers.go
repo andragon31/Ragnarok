@@ -576,6 +576,207 @@ func (s *Server) handleRuleGet(ctx context.Context, req *Request) (*Response, er
 	}, nil
 }
 
+func (s *Server) handleRuleCreateOrReuse(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		Name        string `json:"name"`
+		Category    string `json:"category"`
+		Content     string `json:"content"`
+		Pattern     string `json:"pattern"`
+		Severity    string `json:"severity,omitempty"`
+		Source      string `json:"source,omitempty"`
+		Fingerprint string `json:"fingerprint,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.Name == "" || params.Category == "" {
+		return nil, fmt.Errorf("name and category are required")
+	}
+
+	if params.Severity == "" {
+		params.Severity = "medium"
+	}
+	if params.Source == "" {
+		params.Source = "generated"
+	}
+
+	existingQuery := `SELECT id, name, category, content, pattern, severity FROM rules WHERE name = ? AND category = ?`
+	var existingID, existingName, existingCategory, existingContent, existingPattern, existingSeverity string
+	err := s.db.QueryRow(existingQuery, params.Name, params.Category).Scan(
+		&existingID, &existingName, &existingCategory, &existingContent, &existingPattern, &existingSeverity,
+	)
+
+	if err == nil {
+		return &Response{
+			Result: map[string]interface{}{
+				"reused":   true,
+				"rule_id":  existingID,
+				"name":     existingName,
+				"category": existingCategory,
+				"message":  "Rule already exists",
+			},
+		}, nil
+	}
+
+	if err != sql.ErrNoRows {
+		return nil, fmt.Errorf("database error: %w", err)
+	}
+
+	ruleID := generateID("rule")
+	now := time.Now()
+
+	insertQuery := `INSERT INTO rules (id, name, category, content, severity, scope, status, is_active, source, pattern, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 'global', 'active', 1, ?, ?, ?, ?)`
+	_, err = s.db.Exec(insertQuery, ruleID, params.Name, params.Category, params.Content, params.Severity,
+		params.Source, params.Pattern, now, now)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rule: %w", err)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"reused":   false,
+			"rule_id":  ruleID,
+			"name":     params.Name,
+			"category": params.Category,
+			"pattern":  params.Pattern,
+			"severity": params.Severity,
+			"source":   params.Source,
+			"message":  "Rule created successfully",
+		},
+	}, nil
+}
+
+func (s *Server) handleRuleCreateFromPRD(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		Requirements []map[string]string `json:"requirements"`
+		ProjectPath  string              `json:"project_path,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if len(params.Requirements) == 0 {
+		return &Response{
+			Result: map[string]interface{}{
+				"created": 0,
+				"reused":  0,
+				"rules":   []map[string]string{},
+				"message": "No requirements provided",
+			},
+		}, nil
+	}
+
+	nonFunctionalKeywords := map[string]string{
+		"security":       "security",
+		"performance":    "performance",
+		"scalability":    "scalability",
+		"compliance":     "compliance",
+		"rate limit":     "rate-limiting",
+		"owasp":          "owasp",
+		"encryption":     "encryption",
+		"authentication": "auth",
+		"authorization":  "authorization",
+		"audit":          "audit",
+		"logging":        "logging",
+		"monitoring":     "monitoring",
+	}
+
+	rulePatterns := map[string]string{
+		"security":      `(password|credential|secret|token|auth|sql|injection|xss|csrf|cors|https|tls|encrypt)`,
+		"performance":   `(cache|memoize|lazy|index|query|optimiz|benchmark|profil)`,
+		"scalability":   `(horizontal|scale|vertical|load.?balanc|partition|shard|replica)`,
+		"compliance":    `(gdpr|hipaa|pci|soap|legal|regulatory|audit.?log)`,
+		"rate-limiting": `(rate.?limit|throttl|debouce|quota|threshold)`,
+		"owasp":         `(owasp|injection|xss|csrf|idor|xxe|sensitive|security.?header)`,
+		"encryption":    `(encrypt|decrypt|crypt|hash|signature|key.?manag)`,
+		"auth":          `(oauth|jwt|session|cookie|login|logout|register|2fa|mfa|totp)`,
+		"authorization": `(rbac|acl|permission|role|policy|ABAC|PBAC)`,
+		"audit":         `(audit.?log|event.?track|user.?action|complianc.?log)`,
+		"logging":       `(log|logger|trace|debug|info|warn|error|fatal)`,
+		"monitoring":    `(metric|monitor|alert|observab|trac|dashboar|prometheus|grafana)`,
+	}
+
+	created := 0
+	reused := 0
+	rules := []map[string]string{}
+
+	for _, req := range params.Requirements {
+		reqType, _ := req["type"]
+		reqTitle, _ := req["title"]
+		reqID, _ := req["id"]
+
+		reqTypeLower := strings.ToLower(reqType)
+		reqTitleLower := strings.ToLower(reqTitle)
+
+		var matchedCategory string
+		for keyword, category := range nonFunctionalKeywords {
+			if strings.Contains(reqTypeLower, keyword) || strings.Contains(reqTitleLower, keyword) {
+				matchedCategory = category
+				break
+			}
+		}
+
+		if matchedCategory == "" {
+			continue
+		}
+
+		pattern, exists := rulePatterns[matchedCategory]
+		if !exists {
+			pattern = ""
+		}
+
+		ruleName := strings.ReplaceAll(strings.ToLower(matchedCategory)+"-"+reqID, " ", "-")
+		ruleContent := fmt.Sprintf("PRD Requirement [%s]: %s - %s", reqID, reqType, reqTitle)
+
+		result, err := s.handleRuleCreateOrReuse(ctx, &Request{
+			Params: mustMarshal(map[string]interface{}{
+				"name":     ruleName,
+				"category": matchedCategory,
+				"content":  ruleContent,
+				"pattern":  pattern,
+				"severity": "high",
+				"source":   "prd",
+			}),
+		})
+		if err != nil {
+			log.Printf("Error creating rule for requirement %s: %v", reqID, err)
+			continue
+		}
+
+		if resultMap, ok := result.Result.(map[string]interface{}); ok {
+			if reusedVal, ok := resultMap["reused"].(bool); ok && reusedVal {
+				reused++
+			} else {
+				created++
+			}
+			rules = append(rules, map[string]string{
+				"name":     ruleName,
+				"category": matchedCategory,
+				"pattern":  pattern,
+			})
+		}
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"created":     created,
+			"reused":      reused,
+			"total_rules": created + reused,
+			"rules":       rules,
+			"message":     fmt.Sprintf("Processed %d requirements: %d created, %d reused", len(params.Requirements), created, reused),
+		},
+	}, nil
+}
+
+func mustMarshal(v interface{}) []byte {
+	data, _ := json.Marshal(v)
+	return data
+}
+
 func (s *Server) handleWorkflowStart(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
 		Name        string `json:"name"`

@@ -1241,6 +1241,32 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 		}
 	}
 
+	// 2b. Skoll: Generate Rules from Non-Functional Requirements
+	if !shouldBreak() {
+		step("Skoll: Generate Rules from PRD", func() (interface{}, error) {
+			prdResult := results["Fenrir: Parse PRD Requirements"]
+			if prdMap, ok := prdResult.(map[string]interface{}); ok {
+				if reqs, ok := prdMap["requirements"].([]interface{}); ok && len(reqs) > 0 {
+					reqsFormatted := make([]map[string]string, 0, len(reqs))
+					for _, r := range reqs {
+						if rm, ok := r.(map[string]interface{}); ok {
+							reqsFormatted = append(reqsFormatted, map[string]string{
+								"id":    fmt.Sprintf("%v", rm["id"]),
+								"type":  fmt.Sprintf("%v", rm["type"]),
+								"title": fmt.Sprintf("%v", rm["title"]),
+							})
+						}
+					}
+					return s.callTool(ctx, "rule_create_from_prd", map[string]interface{}{
+						"requirements": reqsFormatted,
+						"project_path": params.ProjectPath,
+					})
+				}
+			}
+			return nil, nil
+		})
+	}
+
 	// 3. Skoll: Structure Setup (Check if team exists)
 	agentIDs := []string{}
 	typeToAgentID := make(map[string]string)
