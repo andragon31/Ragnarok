@@ -1132,6 +1132,7 @@ func findAgentByType(agentType string, agents []map[string]string) string {
 }
 
 func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Request) (*Response, error) {
+	log.Printf("   [ROOT] handleWorkflowProjectLifecycle called")
 	var params struct {
 		ProjectPath  string   `json:"project_path"`
 		PRDFile      string   `json:"prd_file,omitempty"`
@@ -1158,15 +1159,20 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 	}
 
 	step := func(name string, fn func() (interface{}, error)) {
+		log.Printf("   [STEP] step() called for: %s", name)
 		if shouldBreak() {
+			log.Printf("   [STEP] %s SKIPPED - shouldBreak()=true", name)
 			return
 		}
+		log.Printf("   [STEP] %s executing...", name)
 		out, err := fn()
 		status := "success"
 		if err != nil {
 			status = "error"
+			log.Printf("   [STEP] %s returned error: %v", name, err)
 			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
 		} else {
+			log.Printf("   [STEP] %s completed successfully", name)
 			steps = append(steps, WorkflowStep{Name: name, Status: status, Output: out})
 		}
 		results[name] = out
@@ -1242,30 +1248,54 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 	}
 
 	// 2b. Skoll: Generate Rules from Non-Functional Requirements
+	log.Printf("   [RULEGEN] === Rule Generation Step Starting ===")
+	log.Printf("   [RULEGEN] shouldBreak()=%v, elapsed=%v", shouldBreak(), time.Since(startTime))
 	if !shouldBreak() {
 		step("Skoll: Generate Rules from PRD", func() (interface{}, error) {
+			log.Printf("   [RULEGEN] Inside step closure, looking up prdResult...")
 			prdResult := results["Fenrir: Parse PRD Requirements"]
-			if prdMap, ok := prdResult.(map[string]interface{}); ok {
-				if reqs, ok := prdMap["requirements"].([]interface{}); ok && len(reqs) > 0 {
-					reqsFormatted := make([]map[string]string, 0, len(reqs))
-					for _, r := range reqs {
-						if rm, ok := r.(map[string]interface{}); ok {
-							reqsFormatted = append(reqsFormatted, map[string]string{
-								"id":    fmt.Sprintf("%v", rm["id"]),
-								"type":  fmt.Sprintf("%v", rm["type"]),
-								"title": fmt.Sprintf("%v", rm["title"]),
-							})
-						}
-					}
-					return s.callTool(ctx, "rule_create_from_prd", map[string]interface{}{
-						"requirements": reqsFormatted,
-						"project_path": params.ProjectPath,
+			log.Printf("   [RULEGEN] prdResult type=%T, isNil=%v", prdResult, prdResult == nil)
+			if prdResult == nil {
+				log.Printf("   [RULEGEN] WARNING: prdResult is nil! results has %d keys", len(results))
+				return nil, fmt.Errorf("prdResult is nil: Fenrir step may have failed")
+			}
+			prdMap, ok := prdResult.(map[string]interface{})
+			if !ok {
+				log.Printf("   [RULEGEN] ERROR: prdResult is not map[string]interface{}, it's %T", prdResult)
+				return nil, fmt.Errorf("prdResult type mismatch: got %T", prdResult)
+			}
+			reqs, ok := prdMap["requirements"].([]interface{})
+			if !ok || len(reqs) == 0 {
+				log.Printf("   [RULEGEN] No requirements found in prdMap")
+				return nil, nil
+			}
+			log.Printf("   [RULEGEN] Found %d requirements, formatting...", len(reqs))
+			reqsFormatted := make([]map[string]string, 0, len(reqs))
+			for _, r := range reqs {
+				if rm, ok := r.(map[string]interface{}); ok {
+					reqsFormatted = append(reqsFormatted, map[string]string{
+						"id":    fmt.Sprintf("%v", rm["id"]),
+						"type":  fmt.Sprintf("%v", rm["type"]),
+						"title": fmt.Sprintf("%v", rm["title"]),
 					})
 				}
 			}
-			return nil, nil
+			log.Printf("   [RULEGEN] Calling rule_create_from_prd with %d requirements", len(reqsFormatted))
+			result, err := s.callTool(ctx, "rule_create_from_prd", map[string]interface{}{
+				"requirements": reqsFormatted,
+				"project_path": params.ProjectPath,
+			})
+			if err != nil {
+				log.Printf("   [RULEGEN] rule_create_from_prd returned error: %v", err)
+			} else {
+				log.Printf("   [RULEGEN] rule_create_from_prd succeeded, result type=%T", result)
+			}
+			return result, err
 		})
+	} else {
+		log.Printf("   [RULEGEN] shouldBreak=true, skipping rule generation step")
 	}
+	log.Printf("   [RULEGEN] === Rule Generation Step Complete ===")
 
 	// 3. Skoll: Structure Setup (Check if team exists)
 	agentIDs := []string{}
