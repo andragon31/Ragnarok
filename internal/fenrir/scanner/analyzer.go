@@ -1,9 +1,13 @@
 package scanner
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -711,6 +715,28 @@ func GenerateRulesConfig(analysis *ProjectAnalysis) []map[string]string {
 	}
 
 	return rules
+}
+
+func GenerateRuleFingerprint(name, category, description string) string {
+	input := strings.Join([]string{
+		strings.ToLower(name),
+		strings.ToLower(category),
+		extractKeywords(description),
+	}, "|")
+
+	hash := sha256.Sum256([]byte(input))
+	return hex.EncodeToString(hash[:])
+}
+
+func extractKeywords(text string) string {
+	text = strings.ToLower(text)
+	text = regexp.MustCompile(`[^a-z0-9\s]`).ReplaceAllString(text, "")
+	words := strings.Fields(text)
+	if len(words) <= 5 {
+		return strings.Join(words, ",")
+	}
+	sort.Strings(words)
+	return strings.Join(words[:5], ",")
 }
 
 func GenerateStandardsConfig(analysis *ProjectAnalysis) []map[string]string {

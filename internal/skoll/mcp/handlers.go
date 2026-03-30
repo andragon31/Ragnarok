@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/andragon31/Ragnarok/internal/skoll/skills"
@@ -492,7 +494,19 @@ func (s *Server) handleRuleCheck(ctx context.Context, req *Request) (*Response, 
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
-	query := `SELECT id, name, category, content, severity FROM rules WHERE is_active = 1`
+	action := strings.TrimSpace(params.Action)
+	if action == "" {
+		return &Response{
+			Result: map[string]interface{}{
+				"action":        "",
+				"allowed":       true,
+				"rules_checked": 0,
+				"violations":    []map[string]string{},
+			},
+		}, nil
+	}
+
+	query := `SELECT id, name, category, content, severity, pattern FROM rules WHERE is_active = 1`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check rules: %w", err)
@@ -500,17 +514,32 @@ func (s *Server) handleRuleCheck(ctx context.Context, req *Request) (*Response, 
 	defer rows.Close()
 
 	violations := []map[string]string{}
+	rulesChecked := 0
 	for rows.Next() {
-		var id, name, category, content, severity string
-		if err := rows.Scan(&id, &name, &category, &content, &severity); err != nil {
+		var id, name, category, content, severity, pattern string
+		if err := rows.Scan(&id, &name, &category, &content, &severity, &pattern); err != nil {
 			continue
 		}
-		violations = append(violations, map[string]string{
-			"id":       id,
-			"name":     name,
-			"category": category,
-			"severity": severity,
-		})
+		rulesChecked++
+
+		if pattern == "" {
+			continue
+		}
+
+		matched, err := regexp.MatchString(pattern, action)
+		if err != nil {
+			log.Printf("Invalid pattern %q for rule %s: %v", pattern, name, err)
+			continue
+		}
+
+		if matched {
+			violations = append(violations, map[string]string{
+				"id":       id,
+				"name":     name,
+				"category": category,
+				"severity": severity,
+			})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rules: %w", err)
@@ -518,9 +547,9 @@ func (s *Server) handleRuleCheck(ctx context.Context, req *Request) (*Response, 
 
 	return &Response{
 		Result: map[string]interface{}{
-			"action":        params.Action,
+			"action":        action,
 			"allowed":       len(violations) == 0,
-			"rules_checked": len(violations),
+			"rules_checked": rulesChecked,
 			"violations":    violations,
 		},
 	}, nil

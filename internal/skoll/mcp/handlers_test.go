@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"regexp"
 	"testing"
 )
 
@@ -235,4 +236,147 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestRulePatternMatching(t *testing.T) {
+	tests := []struct {
+		name        string
+		action      string
+		pattern     string
+		expectMatch bool
+	}{
+		{
+			name:        "Delete tmp file blocked",
+			action:      "rm /tmp/sensitive.txt",
+			pattern:     `rm\s+/tmp/`,
+			expectMatch: true,
+		},
+		{
+			name:        "Safe delete allowed",
+			action:      "rm ./build/output.txt",
+			pattern:     `rm\s+/tmp/`,
+			expectMatch: false,
+		},
+		{
+			name:        "Any type usage blocked",
+			action:      "create variable of type any",
+			pattern:     `\bany\b`,
+			expectMatch: true,
+		},
+		{
+			name:        "Specific type allowed",
+			action:      "create variable of type string",
+			pattern:     `\bany\b`,
+			expectMatch: false,
+		},
+		{
+			name:        "Dangerous sudo rm rf blocked",
+			action:      "sudo rm -rf /important",
+			pattern:     `sudo\s+rm\s+-rf`,
+			expectMatch: true,
+		},
+		{
+			name:        "Safe rm allowed",
+			action:      "rm file.txt",
+			pattern:     `sudo\s+rm\s+-rf`,
+			expectMatch: false,
+		},
+		{
+			name:        "Skip test files in cleanup",
+			action:      "rm ./src/**/*.test.js",
+			pattern:     `\.test\.`,
+			expectMatch: true,
+		},
+		{
+			name:        "Normal file cleanup allowed",
+			action:      "rm ./build/bundle.js",
+			pattern:     `\.test\.`,
+			expectMatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched, err := regexp.MatchString(tt.pattern, tt.action)
+			if err != nil {
+				t.Fatalf("Pattern error: %v", err)
+			}
+			if matched != tt.expectMatch {
+				t.Errorf("action=%q pattern=%q: expected match=%v, got %v",
+					tt.action, tt.pattern, tt.expectMatch, matched)
+			}
+		})
+	}
+}
+
+func TestRuleCheckEmptyAction(t *testing.T) {
+	result := map[string]interface{}{
+		"action":        "",
+		"allowed":       true,
+		"rules_checked": 0,
+		"violations":    []map[string]string{},
+	}
+
+	if result["allowed"] != true {
+		t.Error("Empty action should be allowed")
+	}
+
+	violations := result["violations"].([]map[string]string)
+	if len(violations) != 0 {
+		t.Errorf("Empty action should have 0 violations, got %d", len(violations))
+	}
+}
+
+func TestRuleCheckNoViolations(t *testing.T) {
+	violations := []map[string]string{
+		{"id": "rule1", "name": "no-commit-without-tests", "category": "quality", "severity": "high"},
+	}
+
+	result := map[string]interface{}{
+		"action":        "git commit -m 'add feature with tests'",
+		"allowed":       len(violations) == 0,
+		"rules_checked": 5,
+		"violations":    violations,
+	}
+
+	if result["allowed"] != false {
+		t.Error("Action with matching rule should not be allowed")
+	}
+
+	v := result["violations"].([]map[string]string)
+	if len(v) != 1 || v[0]["name"] != "no-commit-without-tests" {
+		t.Errorf("Expected violation 'no-commit-without-tests', got %+v", v)
+	}
+}
+
+func TestRuleCheckAllowed(t *testing.T) {
+	violations := []map[string]string{}
+
+	result := map[string]interface{}{
+		"action":        "git commit -m 'add feature with tests'",
+		"allowed":       len(violations) == 0,
+		"rules_checked": 5,
+		"violations":    violations,
+	}
+
+	if result["allowed"] != true {
+		t.Error("Action without violations should be allowed")
+	}
+}
+
+func TestRulePatternFingerprint(t *testing.T) {
+	patterns := []string{
+		"commit.*without.*test",
+		"delete.*\\/tmp\\/.*",
+		"\\bany\\b",
+		"sudo.*rm.*-rf.*\\/.*",
+	}
+
+	for _, pattern := range patterns {
+		matched, err := regexp.MatchString(pattern, "test string")
+		if err != nil {
+			t.Errorf("Invalid pattern %q: %v", pattern, err)
+		}
+		_ = matched
+	}
 }

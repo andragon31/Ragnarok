@@ -228,6 +228,37 @@ func InitSchema(db *sql.DB) error {
 
 	CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(content, content=observations, content_rowid=rowid);
 	CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(content, content=nodes, content_rowid=rowid);
+
+	CREATE TABLE IF NOT EXISTS rule_registry (
+		id TEXT PRIMARY KEY,
+		fingerprint TEXT UNIQUE NOT NULL,
+		name TEXT NOT NULL,
+		category TEXT NOT NULL,
+		pattern TEXT,
+		content TEXT,
+		severity TEXT DEFAULT 'medium',
+		source TEXT DEFAULT 'generated',
+		usage_count INTEGER DEFAULT 0,
+		project_count INTEGER DEFAULT 0,
+		tags TEXT,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS rule_usage_log (
+		id TEXT PRIMARY KEY,
+		rule_id TEXT NOT NULL,
+		project_path TEXT,
+		action TEXT,
+		was_violation INTEGER DEFAULT 0,
+		checked_at DATETIME NOT NULL,
+		FOREIGN KEY (rule_id) REFERENCES rule_registry(id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_rule_registry_fingerprint ON rule_registry(fingerprint);
+	CREATE INDEX IF NOT EXISTS idx_rule_registry_category ON rule_registry(category);
+	CREATE INDEX IF NOT EXISTS idx_rule_usage_log_rule ON rule_usage_log(rule_id);
+	CREATE INDEX IF NOT EXISTS idx_rule_usage_log_project ON rule_usage_log(project_path);
 	`
 
 	_, err := db.Exec(schema)

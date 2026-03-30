@@ -3,6 +3,7 @@ package scanner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -284,5 +285,66 @@ func TestAnalyzeSkipsHiddenDirs(t *testing.T) {
 		if filepath.HasPrefix(f, ".hidden") || f == "node_modules/pkg/file.js" || f == "vendor/module/file.go" {
 			t.Errorf("Unexpected file in RootFiles: %s", f)
 		}
+	}
+}
+
+func TestGenerateRuleFingerprint(t *testing.T) {
+	fp1 := GenerateRuleFingerprint(
+		"no-commit-without-tests",
+		"quality",
+		"Commits that modify code must include or update tests",
+	)
+
+	fp2 := GenerateRuleFingerprint(
+		"no-commit-without-tests",
+		"quality",
+		"Commits that modify code must include or update tests",
+	)
+
+	if fp1 != fp2 {
+		t.Error("Same inputs should produce same fingerprint")
+	}
+
+	fp3 := GenerateRuleFingerprint(
+		"strict-typescript",
+		"code-quality",
+		"Avoid any types, use explicit interfaces",
+	)
+
+	if fp1 == fp3 {
+		t.Error("Different rules should produce different fingerprints")
+	}
+
+	if len(fp1) != 64 {
+		t.Errorf("SHA256 hash should be 64 hex characters, got %d", len(fp1))
+	}
+}
+
+func TestExtractKeywords(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		expectWords int
+	}{
+		{
+			name:        "Short description",
+			input:       "avoid any types",
+			expectWords: 3,
+		},
+		{
+			name:        "Long description",
+			input:       "commits that modify code must include or update tests",
+			expectWords: 5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kw := extractKeywords(tt.input)
+			words := strings.Split(kw, ",")
+			if len(words) != tt.expectWords {
+				t.Errorf("Expected %d keywords, got %d: %s", tt.expectWords, len(words), kw)
+			}
+		})
 	}
 }

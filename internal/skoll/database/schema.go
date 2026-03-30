@@ -216,6 +216,7 @@ func runMigrations(db *sql.DB) error {
 		{"agents", "agent_type", "TEXT", `ALTER TABLE agents ADD COLUMN agent_type TEXT`},
 		{"agents", "allowed_tools", "TEXT", `ALTER TABLE agents ADD COLUMN allowed_tools TEXT`},
 		{"workflows", "deprecated", "INTEGER", `ALTER TABLE workflows ADD COLUMN deprecated INTEGER DEFAULT 0`},
+		{"rules", "pattern", "TEXT", `ALTER TABLE rules ADD COLUMN pattern TEXT`},
 	}
 
 	for _, m := range migrations {
