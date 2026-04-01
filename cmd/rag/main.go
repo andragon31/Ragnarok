@@ -25,7 +25,7 @@ import (
 	tyrdb "github.com/andragon31/Ragnarok/internal/tyr/database"
 )
 
-var version = "2.4.9"
+var version = "2.4.10"
 
 func toInt(v interface{}) int {
 	if v == nil {
