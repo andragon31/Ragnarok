@@ -1264,22 +1264,35 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 				log.Printf("   [RULEGEN] ERROR: prdResult is not map[string]interface{}, it's %T", prdResult)
 				return nil, fmt.Errorf("prdResult type mismatch: got %T", prdResult)
 			}
-			reqs, ok := prdMap["requirements"].([]interface{})
-			if !ok || len(reqs) == 0 {
-				log.Printf("   [RULEGEN] No requirements found in prdMap")
+			reqsRaw, ok := prdMap["requirements"]
+			if !ok {
+				log.Printf("   [RULEGEN] No 'requirements' key found in prdMap")
 				return nil, nil
 			}
-			log.Printf("   [RULEGEN] Found %d requirements, formatting...", len(reqs))
-			reqsFormatted := make([]map[string]string, 0, len(reqs))
-			for _, r := range reqs {
-				if rm, ok := r.(map[string]interface{}); ok {
-					reqsFormatted = append(reqsFormatted, map[string]string{
-						"id":    fmt.Sprintf("%v", rm["id"]),
-						"type":  fmt.Sprintf("%v", rm["type"]),
-						"title": fmt.Sprintf("%v", rm["title"]),
-					})
+			var reqsFormatted []map[string]string
+			switch r := reqsRaw.(type) {
+			case []map[string]string:
+				reqsFormatted = r
+			case []interface{}:
+				reqsFormatted = make([]map[string]string, 0, len(r))
+				for _, item := range r {
+					if rm, ok := item.(map[string]interface{}); ok {
+						reqsFormatted = append(reqsFormatted, map[string]string{
+							"id":    fmt.Sprintf("%v", rm["id"]),
+							"type":  fmt.Sprintf("%v", rm["type"]),
+							"title": fmt.Sprintf("%v", rm["title"]),
+						})
+					}
 				}
+			default:
+				log.Printf("   [RULEGEN] ERROR: requirements is %T, expected []map[string]string or []interface{}", reqsRaw)
+				return nil, fmt.Errorf("requirements type mismatch: got %T", reqsRaw)
 			}
+			if len(reqsFormatted) == 0 {
+				log.Printf("   [RULEGEN] No requirements found after type conversion")
+				return nil, nil
+			}
+			log.Printf("   [RULEGEN] Found %d requirements, formatting...", len(reqsFormatted))
 			log.Printf("   [RULEGEN] Calling rule_create_from_prd with %d requirements", len(reqsFormatted))
 			result, err := s.callTool(ctx, "rule_create_from_prd", map[string]interface{}{
 				"requirements": reqsFormatted,
