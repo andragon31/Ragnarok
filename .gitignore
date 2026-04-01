@@ -46,3 +46,12 @@ go.work
 go.work.sum
 
 tmp/
+
+# Release artifacts (goreleaser)
+dist/
+
+# Windows special device
+nul
+
+# Local documentation and analysis
+docs/
