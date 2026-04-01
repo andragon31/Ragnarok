@@ -694,7 +694,7 @@ func getToolInputSchema(name string) string {
 		"rule_check":           `{"type":"object","properties":{"action":{"type":"string"}},"required":["action"]}`,
 		"rule_get":             `{"type":"object","properties":{"rule_id":{"type":"string"}},"required":["rule_id"]}`,
 		"rule_create_or_reuse": `{"type":"object","properties":{"name":{"type":"string"},"category":{"type":"string"},"content":{"type":"string"},"pattern":{"type":"string"},"severity":{"type":"string"},"source":{"type":"string"}},"required":["name","category"]}`,
-		"rule_create_from_prd": `{"type":"object","properties":{"requirements":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"type":{"type":"string"}}}},{"project_path":{"type":"string"}}},"required":["requirements"]}`,
+		"rule_create_from_prd": `{"type":"object","properties":{"requirements":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"type":{"type":"string"},"project_path":{"type":"string"}}}}},"required":["requirements"]}`,
 		"bootstrap_import":     `{"type":"object","properties":{"project_path":{"type":"string"},"skills_only":{"type":"boolean"},"rules_only":{"type":"boolean"}},"required":["project_path"]}`,
 
 		// Tyr (Quality)
