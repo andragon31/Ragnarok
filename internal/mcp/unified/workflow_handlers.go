@@ -1303,21 +1303,23 @@ func (s *Server) handleWorkflowPlanDevelopV2(ctx context.Context, req *Request) 
 		} else {
 			assignedType, _ := task["assigned_agent_type"].(string)
 			agentIDToUse := params.AgentID
-			if agentIDToUse == "" && assignedType != "" {
-				availableAgents, err := s.callTool(ctx, "agent_specialized_list", map[string]interface{}{
-					"agent_type": assignedType,
-				})
-				log.Printf("   [DEBUG] Looking for type=%s, result=%+v, err=%v", assignedType, availableAgents, err)
-				if err == nil {
-					if agentsMap, ok := availableAgents.(map[string]interface{}); ok {
-						if agents, ok := agentsMap["agents"].([]map[string]interface{}); ok && len(agents) > 0 {
-							agentIDToUse, _ = agents[0]["id"].(string)
-							log.Printf("   [DEBUG] Found agent of type %s: %s", assignedType, agentIDToUse)
+			if agentIDToUse == "" {
+				if assignedType != "" {
+					availableAgents, err := s.callTool(ctx, "agent_specialized_list", map[string]interface{}{
+						"agent_type": assignedType,
+					})
+					log.Printf("   [DEBUG] Looking for type=%s, result=%+v, err=%v", assignedType, availableAgents, err)
+					if err == nil {
+						if agentsMap, ok := availableAgents.(map[string]interface{}); ok {
+							if agents, ok := agentsMap["agents"].([]map[string]interface{}); ok && len(agents) > 0 {
+								agentIDToUse, _ = agents[0]["id"].(string)
+								log.Printf("   [DEBUG] Found agent of type %s: %s", assignedType, agentIDToUse)
+							}
 						}
 					}
 				}
 				if agentIDToUse == "" {
-					log.Printf("   [DEBUG] No agent of type %s, trying backend fallback", assignedType)
+					log.Printf("   [DEBUG] No agent found, trying backend fallback")
 					availableAgents, err := s.callTool(ctx, "agent_specialized_list", map[string]interface{}{
 						"agent_type": "backend",
 					})

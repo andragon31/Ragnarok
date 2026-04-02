@@ -269,7 +269,26 @@ func (s *Server) handleTaskGetNext(ctx context.Context, req *Request) (*Response
 	}
 
 	return &Response{Result: map[string]interface{}{
-		"task":        task,
+		"task": map[string]interface{}{
+			"id":                  task.ID,
+			"phase_id":            task.PhaseID,
+			"prd_requirement_id":  task.PRDRequirementID,
+			"title":               task.Title,
+			"description":         task.Description,
+			"status":              task.Status,
+			"priority":            task.Priority,
+			"assigned_agent_ids":  task.AssignedAgentIDs,
+			"assigned_agent_type": task.AssignedAgentType,
+			"estimated_hours":     task.EstimatedHours,
+			"actual_hours":        task.ActualHours,
+			"notes":               task.Notes,
+			"blocker":             task.Blocker,
+			"milestone":           task.Milestone,
+			"subtasks":            task.Subtasks,
+			"completed_at":        task.CompletedAt,
+			"created_at":          task.CreatedAt,
+			"updated_at":          task.UpdatedAt,
+		},
 		"phase_title": phaseTitle.String,
 	}}, nil
 }
