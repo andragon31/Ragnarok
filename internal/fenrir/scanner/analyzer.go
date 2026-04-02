@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -51,12 +52,13 @@ type ArchitectureInfo struct {
 }
 
 type ModuleInfo struct {
-	Path         string `json:"path"`
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Language     string `json:"language"`
-	Dependencies int    `json:"dependencies"`
-	HasTests     bool   `json:"has_tests"`
+	Path         string   `json:"path"`
+	Name         string   `json:"name"`
+	Type         string   `json:"type"`
+	Language     string   `json:"language"`
+	Dependencies int      `json:"dependencies"`
+	DependsOn    []string `json:"depends_on,omitempty"`
+	HasTests     bool     `json:"has_tests"`
 }
 
 type PatternInfo struct {
@@ -97,6 +99,7 @@ func (a *ProjectAnalyzer) Analyze() (*ProjectAnalysis, error) {
 	a.detectStack(analysis)
 	a.detectArchitecture(analysis)
 	a.detectPatterns(analysis)
+	a.resolveDependencies(analysis)
 
 	return analysis, nil
 }
@@ -929,8 +932,176 @@ func GeneratePhasesAndTasks(analysis *ProjectAnalysis) []PhaseTemplate {
 	return phases
 }
 
-func GetRecommendedAgents(analysis *ProjectAnalysis) []map[string]string {
+type LLMStackAnalysis struct {
+	RecommendedAgents []map[string]string `json:"recommended_agents"`
+	Reasoning         string              `json:"reasoning"`
+	Complexity        string              `json:"complexity"`
+	HasFrontend       bool                `json:"has_frontend"`
+	HasBackend        bool                `json:"has_backend"`
+	HasSecurity       bool                `json:"has_security"`
+	HasDevops         bool                `json:"has_devops"`
+	HasQA             bool                `json:"has_qa"`
+	HasDocs           bool                `json:"has_docs"`
+}
+
+func GenerateLLMAnalysisPrompt(analysis *ProjectAnalysis, requirements []map[string]string) string {
+	stackLang := "Unknown"
+	framework := "Unknown"
+	archType := "Unknown"
+	hasDocker := false
+	hasCI := false
+	hasTests := false
+	dbEngine := "None"
+
+	if analysis != nil {
+		if analysis.Stack != nil {
+			stackLang = analysis.Stack.Language
+			framework = analysis.Stack.Framework
+			hasDocker = analysis.Stack.HasDocker
+			hasCI = analysis.Stack.HasCI
+			hasTests = analysis.Stack.HasTests
+			dbEngine = analysis.Stack.DBEngine
+		}
+		if analysis.Architecture != nil {
+			archType = analysis.Architecture.Type
+		}
+	}
+
+	reqSummary := ""
+	if len(requirements) > 0 {
+		reqSummary = fmt.Sprintf("Total requirements: %d\n", len(requirements))
+		for i, req := range requirements {
+			if i >= 10 {
+				reqSummary += fmt.Sprintf("... and %d more\n", len(requirements)-10)
+				break
+			}
+			reqTitle := req["title"]
+			reqType := req["type"]
+			reqSummary += fmt.Sprintf("- [%s] %s\n", reqType, reqTitle)
+		}
+	} else {
+		reqSummary = "No requirements provided"
+	}
+
+	prompt := fmt.Sprintf(`Analyze this software project and recommend the specialized AI agents needed for development.
+
+PROJECT STACK:
+- Language: %s
+- Framework: %s
+- Architecture: %s
+- Database: %s
+- Has Docker: %v
+- Has CI/CD: %v
+- Has Tests: %v
+
+REQUIREMENTS:
+%s
+
+Based on this information, determine which specialized agents are needed. Consider:
+
+1. Always needed:
+   - backend-agent: For API, database, backend services
+   - docs-agent: For documentation
+
+2. Optional based on stack/features:
+   - frontend-agent: If there's a UI, dashboard, or frontend components
+   - security-agent: If handling auth, encryption, payments, or sensitive data
+   - devops-agent: If has Docker, CI/CD, deployment infrastructure
+   - qa-agent: If has testing requirements or quality gates
+   - architect-agent: For complex multi-module systems or microservices
+
+Respond with a JSON object containing:
+{
+  "recommended_agents": [
+    {"name": "agent-name", "type": "agent-type", "role": "Agent Role", "scope": "what this agent handles"}
+  ],
+  "reasoning": "brief explanation of why these agents",
+  "complexity": "low/medium/high",
+  "has_frontend": true/false,
+  "has_backend": true/false,
+  "has_security": true/false,
+  "has_devops": true/false,
+  "has_qa": true/false,
+  "has_docs": true/false
+}`, stackLang, framework, archType, dbEngine, hasDocker, hasCI, hasTests, reqSummary)
+
+	return prompt
+}
+
+func ParseLLMAnalysisResponse(response string) (*LLMStackAnalysis, error) {
+	response = strings.TrimSpace(response)
+	startIdx := strings.Index(response, "{")
+	endIdx := strings.LastIndex(response, "}")
+	if startIdx == -1 || endIdx == -1 {
+		return nil, fmt.Errorf("no JSON found in LLM response")
+	}
+
+	jsonStr := response[startIdx : endIdx+1]
+	var result LLMStackAnalysis
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse LLM response as JSON: %w", err)
+	}
+
+	if len(result.RecommendedAgents) == 0 {
+		return nil, fmt.Errorf("LLM returned no recommended agents")
+	}
+
+	return &result, nil
+}
+
+func GetRecommendedAgents(analysis *ProjectAnalysis, requirements []map[string]string) []map[string]string {
 	agents := []map[string]string{}
+	hasFrontend := false
+	hasSecurity := false
+	hasDevops := false
+	hasQA := false
+
+	if analysis != nil {
+		if analysis.Architecture != nil && analysis.Architecture.HasFrontend {
+			hasFrontend = true
+		}
+		if analysis.Stack != nil {
+			if analysis.Stack.HasDocker {
+				hasDevops = true
+			}
+			if analysis.Stack.HasTests {
+				hasQA = true
+			}
+		}
+	}
+
+	if requirements != nil {
+		for _, req := range requirements {
+			title := strings.ToLower(req["title"])
+			reqType := strings.ToLower(req["type"])
+
+			if strings.Contains(title, "frontend") || strings.Contains(title, "react") ||
+				strings.Contains(title, "ui") || strings.Contains(title, "interfaz") ||
+				strings.Contains(title, "dashboard") || strings.Contains(title, "componente") {
+				hasFrontend = true
+			}
+
+			if strings.Contains(title, "security") || strings.Contains(title, "owasp") ||
+				strings.Contains(title, "seguridad") || strings.Contains(title, "autenticación") ||
+				strings.Contains(title, "autorización") || strings.Contains(title, "cifrado") ||
+				reqType == "non-functional" {
+				hasSecurity = true
+			}
+
+			if strings.Contains(title, "docker") || strings.Contains(title, "contenedor") ||
+				strings.Contains(title, "despliegue") || strings.Contains(title, "deployment") ||
+				strings.Contains(title, "infraestructura") || strings.Contains(title, "ci/cd") {
+				hasDevops = true
+			}
+
+			if strings.Contains(title, "test") || strings.Contains(title, "prueba") ||
+				strings.Contains(title, "qa") || strings.Contains(title, "quality") ||
+				strings.Contains(title, "calidad") || strings.Contains(title, "e2e") ||
+				strings.Contains(title, "integration") {
+				hasQA = true
+			}
+		}
+	}
 
 	agents = append(agents, map[string]string{
 		"name":  "backend-agent",
@@ -939,11 +1110,7 @@ func GetRecommendedAgents(analysis *ProjectAnalysis) []map[string]string {
 		"scope": "API, database, backend services",
 	})
 
-	if analysis == nil {
-		return agents
-	}
-
-	if (analysis.Architecture != nil && analysis.Architecture.HasFrontend) || (analysis.Stack != nil && analysis.Stack.HasDocker) {
+	if hasFrontend {
 		agents = append(agents, map[string]string{
 			"name":  "frontend-agent",
 			"type":  "frontend",
@@ -952,21 +1119,38 @@ func GetRecommendedAgents(analysis *ProjectAnalysis) []map[string]string {
 		})
 	}
 
-	if analysis.Stack != nil && analysis.Stack.HasTests {
+	if hasSecurity {
 		agents = append(agents, map[string]string{
-			"name":  "qa-agent",
-			"type":  "qa",
-			"role":  "QA Engineer",
-			"scope": "Testing, quality assurance",
+			"name":  "security-agent",
+			"type":  "security",
+			"role":  "Security Engineer",
+			"scope": "Authentication, authorization, OWASP, encryption",
 		})
 	}
-
-	if (analysis.Stack != nil && analysis.Stack.HasDocker) || (analysis.Architecture != nil && analysis.Architecture.IsMonorepo) {
+	if hasDevops {
 		agents = append(agents, map[string]string{
 			"name":  "devops-agent",
 			"type":  "devops",
 			"role":  "DevOps Engineer",
-			"scope": "CI/CD, deployment, infrastructure",
+			"scope": "Infrastructure, CI/CD, Docker, deployment",
+		})
+	}
+	if hasQA {
+		agents = append(agents, map[string]string{
+			"name":  "qa-agent",
+			"type":  "qa",
+			"role":  "QA Automation Engineer",
+			"scope": "Unit testing, integration testing, E2E",
+		})
+	}
+
+	// Nueva lógica: Agente de Arquitectura/Investigación si hay alta complejidad técnica
+	if len(requirements) > 15 || hasSecurity && hasDevops {
+		agents = append(agents, map[string]string{
+			"name":  "architect-agent",
+			"type":  "architect",
+			"role":  "Software Architect",
+			"scope": "System design, tech stack decisions, cross-module consistency",
 		})
 	}
 
@@ -978,4 +1162,55 @@ func GetRecommendedAgents(analysis *ProjectAnalysis) []map[string]string {
 	})
 
 	return agents
+}
+
+func (a *ProjectAnalyzer) resolveDependencies(analysis *ProjectAnalysis) {
+	for _, module := range analysis.Modules {
+		a.scanModuleDependencies(module, analysis)
+	}
+}
+
+func (a *ProjectAnalyzer) scanModuleDependencies(module *ModuleInfo, analysis *ProjectAnalysis) {
+	moduleAbsPath := filepath.Join(a.projectPath, module.Path)
+
+	// Limited scan for performance
+	filepath.Walk(moduleAbsPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || info.Size() > 100000 { // Skip large files
+			return nil
+		}
+
+		ext := filepath.Ext(path)
+		if ext != ".go" && ext != ".js" && ext != ".ts" && ext != ".py" {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		// Look for other module names in imports/requires
+		for _, other := range analysis.Modules {
+			if other.Path == module.Path {
+				continue
+			}
+
+			// Simple check: does the name or path of the other module appear in this file?
+			if strings.Contains(string(content), other.Path) || strings.Contains(string(content), other.Name) {
+				alreadyAdded := false
+				for _, dep := range module.DependsOn {
+					if dep == other.Name {
+						alreadyAdded = true
+						break
+					}
+				}
+				if !alreadyAdded {
+					module.DependsOn = append(module.DependsOn, other.Name)
+					module.Dependencies++
+				}
+			}
+		}
+
+		return nil
+	})
 }

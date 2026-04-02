@@ -13,6 +13,10 @@ import (
 	rootmcp "github.com/andragon31/Ragnarok/internal/mcp"
 )
 
+// - [x] **Fase 3: Unified - Workflow Colaborativo**
+// - [x] Tarea 3.1: Actualizar `workflow_prd_analyze` con el paso de validación.
+// - [x] Tarea 3.2: Implementar la generación automática de tareas de revisión humana ante ambigüedades.
+
 type Request = rootmcp.Request
 type Response = rootmcp.Response
 
@@ -31,6 +35,113 @@ type WorkflowStep struct {
 	Error  string      `json:"error,omitempty"`
 }
 
+func getAgentIDFromResult(agentMap map[string]interface{}) (string, bool) {
+	if id, ok := agentMap["agent_id"].(string); ok && id != "" {
+		return id, true
+	}
+	if id, ok := agentMap["id"].(string); ok && id != "" {
+		return id, true
+	}
+	return "", false
+}
+
+func (s *Server) handleAnalyzeStackWithLLM(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		ProjectPath  string              `json:"project_path"`
+		PRDFile      string              `json:"prd_file,omitempty"`
+		Requirements []map[string]string `json:"requirements,omitempty"`
+		LLMResponse  string              `json:"llm_response,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf(errFailedParseParams, err)
+	}
+
+	if params.ProjectPath == "" {
+		params.ProjectPath = "."
+	}
+
+	if params.LLMResponse != "" {
+		llmResult, parseErr := scanner.ParseLLMAnalysisResponse(params.LLMResponse)
+		if parseErr != nil {
+			return nil, fmt.Errorf("failed to parse LLM response: %w", parseErr)
+		}
+
+		agents := []map[string]string{}
+		for _, agent := range llmResult.RecommendedAgents {
+			agents = append(agents, map[string]string{
+				"name":  agent["name"],
+				"type":  agent["type"],
+				"role":  agent["role"],
+				"scope": agent["scope"],
+			})
+		}
+
+		return &Response{Result: map[string]interface{}{
+			"agents":                agents,
+			"reasoning":             llmResult.Reasoning,
+			"complexity":            llmResult.Complexity,
+			"has_frontend":          llmResult.HasFrontend,
+			"has_backend":           llmResult.HasBackend,
+			"has_security":          llmResult.HasSecurity,
+			"has_devops":            llmResult.HasDevops,
+			"has_qa":                llmResult.HasQA,
+			"has_docs":              llmResult.HasDocs,
+			"recommendation_source": "llm",
+		}}, nil
+	}
+
+	analysis, err := s.parseProjectAnalysisFromPath(params.ProjectPath)
+	if err != nil {
+		analysis = &scanner.ProjectAnalysis{
+			Architecture: &scanner.ArchitectureInfo{},
+			Stack:        &scanner.StackInfo{},
+		}
+	}
+
+	if params.PRDFile != "" {
+		prdResult, err := s.callTool(ctx, "prd_parse", map[string]interface{}{"file_path": params.PRDFile})
+		if err == nil {
+			if prdMap, ok := prdResult.(map[string]interface{}); ok {
+				if reqs, ok := prdMap["requirements"].([]map[string]string); ok {
+					params.Requirements = reqs
+				} else if reqsRaw, ok := prdMap["requirements"].([]interface{}); ok {
+					for _, r := range reqsRaw {
+						if reqMap, ok := r.(map[string]interface{}); ok {
+							req := map[string]string{}
+							if t, ok := reqMap["type"].(string); ok {
+								req["type"] = t
+							}
+							if title, ok := reqMap["title"].(string); ok {
+								req["title"] = title
+							}
+							if id, ok := reqMap["id"].(string); ok {
+								req["id"] = id
+							}
+							params.Requirements = append(params.Requirements, req)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	prompt := scanner.GenerateLLMAnalysisPrompt(analysis, params.Requirements)
+
+	return &Response{Result: map[string]interface{}{
+		"llm_prompt":         prompt,
+		"instructions":       "Execute this prompt with your LLM and pass the response to this tool again with the llm_response parameter set to the LLM's JSON response.",
+		"project_path":       params.ProjectPath,
+		"has_analysis":       analysis != nil && analysis.Stack != nil && analysis.Stack.Language != "",
+		"requirements_count": len(params.Requirements),
+	}}, nil
+}
+
+func (s *Server) parseProjectAnalysisFromPath(projectPath string) (*scanner.ProjectAnalysis, error) {
+	analyzer := scanner.NewProjectAnalyzer(projectPath)
+	return analyzer.Analyze()
+}
+
 func (s *Server) handleWorkflowProjectBootstrap(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
 		ProjectPath string `json:"project_path"`
@@ -39,7 +150,7 @@ func (s *Server) handleWorkflowProjectBootstrap(ctx context.Context, req *Reques
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	steps := []WorkflowStep{}
@@ -47,7 +158,7 @@ func (s *Server) handleWorkflowProjectBootstrap(ctx context.Context, req *Reques
 
 	step := func(name string, fn func() (interface{}, error)) {
 		out, err := fn()
-		status := "success"
+		status := statusSuccess
 		if err != nil {
 			status = "error"
 			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
@@ -86,7 +197,7 @@ func (s *Server) handleWorkflowProjectBootstrap(ctx context.Context, req *Reques
 
 	return &Response{Result: map[string]interface{}{
 		"workflow": "project_bootstrap",
-		"status":   "completed",
+		"status":   statusCompleted,
 		"steps":    steps,
 		"results":  results,
 	}}, nil
@@ -97,10 +208,11 @@ func (s *Server) handleWorkflowPRDAnalyze(ctx context.Context, req *Request) (*R
 		PRDFile     string `json:"prd_file"`
 		ProjectPath string `json:"project_path"`
 		PlanTitle   string `json:"plan_title,omitempty"`
+		LLMResponse string `json:"llm_response,omitempty"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	steps := []WorkflowStep{}
@@ -108,7 +220,7 @@ func (s *Server) handleWorkflowPRDAnalyze(ctx context.Context, req *Request) (*R
 
 	step := func(name string, fn func() (interface{}, error)) {
 		out, err := fn()
-		status := "success"
+		status := statusSuccess
 		if err != nil {
 			status = "error"
 			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
@@ -122,6 +234,7 @@ func (s *Server) handleWorkflowPRDAnalyze(ctx context.Context, req *Request) (*R
 		params.ProjectPath = "."
 	}
 
+	// 1. Scan and parse
 	step("project_scan", func() (interface{}, error) {
 		return s.callTool(ctx, "project_scan", map[string]interface{}{"path": params.ProjectPath})
 	})
@@ -134,47 +247,171 @@ func (s *Server) handleWorkflowPRDAnalyze(ctx context.Context, req *Request) (*R
 	})
 
 	prdResult := results["prd_parse"]
-	prdID := ""
-	if prdMap, ok := prdResult.(map[string]interface{}); ok {
-		if id, ok := prdMap["prd_id"].(string); ok {
-			prdID = id
-		}
+	prdID, contextualSummary := extractPRDMetadata(prdResult)
+
+	step("prd_validate", func() (interface{}, error) {
+		return s.callTool(ctx, "prd_validate", map[string]interface{}{"prd_id": prdID})
+	})
+
+	// 2. Plan generation
+	projectName := params.PlanTitle
+	if projectName == "" {
+		projectName = "Project"
 	}
 
-	step("plan_create_from_prd", func() (interface{}, error) {
+	step(logGeneratePlan, func() (interface{}, error) {
 		return s.callTool(ctx, "plan_create_from_prd", map[string]interface{}{
-			"prd_id": prdID,
-			"title":  params.PlanTitle,
+			"prd_id":       prdID,
+			"project_path": params.ProjectPath,
+			"title":        projectName + logExecutionPlan,
 		})
 	})
 
-	planResult := results["plan_create_from_prd"]
-	planID := ""
-	if planMap, ok := planResult.(map[string]interface{}); ok {
-		if id, ok := planMap["plan_id"].(string); ok {
-			planID = id
+	planResult := results[logGeneratePlan]
+	planID, _ := extractPlanID(planResult)
+
+	// 3. Agent and team setup
+	if analysis == nil {
+		analysis = &scanner.ProjectAnalysis{
+			Architecture: &scanner.ArchitectureInfo{},
+			Stack:        &scanner.StackInfo{},
 		}
 	}
 
+	requirements := extractRequirements(prdResult)
+	requirementsCount := len(requirements)
+	var createdAgentIDs []string
+	var teamID string
+	var pendingLLM bool
+	var llmPrompt, llmInstructions string
+
+	step("Skoll: Create Agent Team", func() (interface{}, error) {
+		var tMap map[string]string
+		var err error
+
+		if params.LLMResponse != "" {
+			ids, tid, tMapRet, err := s.setupTeam(ctx, analysis, requirements, params.ProjectPath, projectName, params.LLMResponse)
+			createdAgentIDs = ids
+			teamID = tid
+			tMap = tMapRet
+			if err == nil && len(createdAgentIDs) > 0 {
+				if teamID == "" && len(createdAgentIDs) > 0 {
+					teamResult, _ := s.callTool(ctx, "team_create", map[string]interface{}{
+						"name":         projectName + " Team",
+						"project_path": params.ProjectPath,
+						"agent_ids":    createdAgentIDs,
+					})
+					if teamMap, ok := teamResult.(map[string]interface{}); ok {
+						teamID, _ = teamMap["team_id"].(string)
+					}
+				}
+				return map[string]interface{}{"team_id": teamID, "agents_created": len(createdAgentIDs), "recommendation_source": "llm"}, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		ids, tid, tMapRet, err := s.setupTeam(ctx, analysis, requirements, params.ProjectPath, projectName)
+		createdAgentIDs = ids
+		teamID = tid
+		tMap = tMapRet
+		result := map[string]interface{}{"team_id": teamID, "agents_created": len(createdAgentIDs)}
+		if source, hasSource := tMap["recommendation_source"]; hasSource && source == "pending_llm" {
+			pendingLLM = true
+			llmPrompt = fmt.Sprintf("%v", tMap["llm_prompt"])
+			llmInstructions = fmt.Sprintf("%v", tMap["llm_instructions"])
+			result["recommendation_source"] = "pending_llm"
+			result["llm_prompt"] = llmPrompt
+			result["llm_instructions"] = llmInstructions
+			result["has_analysis"] = tMap["has_analysis"]
+			result["requirements_count"] = requirementsCount
+			result["project_name"] = tMap["project_name"]
+			result["project_path"] = tMap["project_path"]
+		} else if source, hasSource := tMap["recommendation_source"]; hasSource {
+			result["recommendation_source"] = source
+		}
+		return result, err
+	})
+
+	if pendingLLM {
+		pendingDisplayMessage := fmt.Sprintf(`📋 **Análisis LLM Requerido:**
+
+El sistema necesita que ejecutes el análisis LLM para determinar los agentes especializados requeridos.
+
+**Proyecto**: %s
+**Path**: %s
+**Requisitos detectados**: %d
+
+**Próximo paso**: Ejecuta el prompt LLM y pasa la respuesta a analyze_stack_with_llm para crear los agentes.`,
+			projectName, params.ProjectPath, requirementsCount)
+
+		return &Response{Result: map[string]interface{}{
+			"workflow":              "prd_analyze",
+			"status":                "pending_llm",
+			"prd_id":                prdID,
+			"plan_id":               planID,
+			"recommendation_source": "pending_llm",
+			"llm_prompt":            llmPrompt,
+			"llm_instructions":      llmInstructions,
+			"has_analysis":          fmt.Sprintf("%v", requirementsCount),
+			"project_name":          projectName,
+			"project_path":          params.ProjectPath,
+			"stack_detected":        analysis != nil,
+			"stack":                 getStackFromAnalysis(analysis),
+			"steps":                 steps,
+			"results":               results,
+			"message":               pendingDisplayMessage,
+			"display_to_user":       pendingDisplayMessage,
+		}}, nil
+	}
+
 	step("human_review_create", func() (interface{}, error) {
+		question := "¿Apruebas este plan de desarrollo?"
+		if contextualSummary != "" {
+			question = fmt.Sprintf("Análisis de Visión:\n%s\n\n%s", contextualSummary, question)
+		}
 		return s.callTool(ctx, "human_review_create", map[string]interface{}{
 			"review_type": "prd_approval",
 			"entity_type": "plan",
 			"entity_id":   planID,
-			"question":    "¿Apruebas este plan de desarrollo?",
+			"question":    question,
 		})
 	})
 
+	if projectName == "" {
+		projectName = "Project"
+	}
+
+	agentNames := "backend-agent, docs-agent"
+	if len(createdAgentIDs) > 2 {
+		agentNames = "backend-agent, qa-agent, devops-agent, docs-agent"
+	}
+
+	displayMessage := fmt.Sprintf(`📋 **Resumen del Análisis PRD:**
+- **Plan ID**: %s
+- **PRD ID**: %s
+- **Equipo Creado**: %s (ID: %s)
+- **Agentes Creados**: %d (%s)
+- **Stack Detectado**: %s
+- **Fases y Tareas**: Generadas desde el PRD
+
+**Próximo paso**: Revisar el plan y aprobar para iniciar el desarrollo.`, planID, prdID, projectName+" Team", teamID, len(createdAgentIDs), agentNames, getStackFromAnalysis(analysis))
+
 	return &Response{Result: map[string]interface{}{
-		"workflow":       "prd_analyze",
-		"status":         "completed",
-		"prd_id":         prdID,
-		"plan_id":        planID,
-		"stack_detected": analysis != nil,
-		"stack":          getStackFromAnalysis(analysis),
-		"steps":          steps,
-		"results":        results,
-		"message":        "Plan created with stack-based phases. Human review required before activation.",
+		"workflow":        "prd_analyze",
+		"status":          statusCompleted,
+		"prd_id":          prdID,
+		"plan_id":         planID,
+		"team_id":         teamID,
+		"agents_created":  len(createdAgentIDs),
+		"agent_ids":       createdAgentIDs,
+		"stack_detected":  analysis != nil,
+		"stack":           getStackFromAnalysis(analysis),
+		"steps":           steps,
+		"results":         results,
+		"message":         displayMessage,
+		"display_to_user": displayMessage,
 	}}, nil
 }
 
@@ -186,7 +423,7 @@ func (s *Server) handleWorkflowTeamSetupFromPRD(ctx context.Context, req *Reques
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	steps := []WorkflowStep{}
@@ -194,7 +431,7 @@ func (s *Server) handleWorkflowTeamSetupFromPRD(ctx context.Context, req *Reques
 
 	step := func(name string, fn func() (interface{}, error)) {
 		out, err := fn()
-		status := "success"
+		status := statusSuccess
 		if err != nil {
 			status = "error"
 			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
@@ -223,14 +460,41 @@ func (s *Server) handleWorkflowTeamSetupFromPRD(ctx context.Context, req *Reques
 		return s.callTool(ctx, "prd_parse", map[string]interface{}{"file_path": params.PRDFile})
 	})
 
+	prdResult := results["prd_parse"]
+
 	// 3. Get recommendations (default to backend/docs if no analysis)
+	var requirements []map[string]string
+	if prdResult != nil {
+		if prdMap, ok := prdResult.(map[string]interface{}); ok {
+			if reqs, ok := prdMap["requirements"].([]map[string]string); ok {
+				requirements = reqs
+			} else if reqsRaw, ok := prdMap["requirements"].([]interface{}); ok {
+				for _, r := range reqsRaw {
+					if reqMap, ok := r.(map[string]interface{}); ok {
+						req := map[string]string{}
+						if t, ok := reqMap["type"].(string); ok {
+							req["type"] = t
+						}
+						if title, ok := reqMap["title"].(string); ok {
+							req["title"] = title
+						}
+						if id, ok := reqMap["id"].(string); ok {
+							req["id"] = id
+						}
+						requirements = append(requirements, req)
+					}
+				}
+			}
+		}
+	}
+
 	if analysis == nil {
 		analysis = &scanner.ProjectAnalysis{
 			Architecture: &scanner.ArchitectureInfo{},
 			Stack:        &scanner.StackInfo{},
 		}
 	}
-	recommendations := scanner.GetRecommendedAgents(analysis)
+	recommendations := scanner.GetRecommendedAgents(analysis, requirements)
 
 	// 4. Create Agents
 	agentIDs := []string{}
@@ -250,7 +514,7 @@ func (s *Server) handleWorkflowTeamSetupFromPRD(ctx context.Context, req *Reques
 		}
 
 		if agentMap, ok := agentResult.(map[string]interface{}); ok {
-			if id, ok := agentMap["agent_id"].(string); ok {
+			if id, ok := getAgentIDFromResult(agentMap); ok {
 				agentIDs = append(agentIDs, id)
 				steps = append(steps, WorkflowStep{Name: "agent_create:" + recName, Status: "success", Output: agentMap})
 			}
@@ -284,7 +548,7 @@ func (s *Server) handleWorkflowTeamSetupFromPRD(ctx context.Context, req *Reques
 
 	return &Response{Result: map[string]interface{}{
 		"workflow": "team_setup_from_prd",
-		"status":   "completed",
+		"status":   statusCompleted,
 		"team_id":  teamID,
 		"agents":   agentIDs,
 		"steps":    steps,
@@ -303,7 +567,7 @@ func (s *Server) handleWorkflowAgenticInit(ctx context.Context, req *Request) (*
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	steps := []WorkflowStep{}
@@ -311,7 +575,7 @@ func (s *Server) handleWorkflowAgenticInit(ctx context.Context, req *Request) (*
 
 	step := func(name string, fn func() (interface{}, error)) {
 		out, err := fn()
-		status := "success"
+		status := statusSuccess
 		if err != nil {
 			status = "error"
 			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
@@ -397,7 +661,7 @@ func (s *Server) handleWorkflowPlanDevelop(ctx context.Context, req *Request) (*
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	steps := []WorkflowStep{}
@@ -470,7 +734,7 @@ func (s *Server) handleWorkflowPlanDevelop(ctx context.Context, req *Request) (*
 
 	return &Response{Result: map[string]interface{}{
 		"workflow":        "plan_develop",
-		"status":          "completed",
+		"status":          statusCompleted,
 		"completed_tasks": completedTasks,
 		"blocked_tasks":   blockedTasks,
 		"progress":        planProgress,
@@ -486,7 +750,7 @@ func (s *Server) handleWorkflowSessionStart(ctx context.Context, req *Request) (
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	steps := []WorkflowStep{}
@@ -494,7 +758,7 @@ func (s *Server) handleWorkflowSessionStart(ctx context.Context, req *Request) (
 
 	step := func(name string, fn func() (interface{}, error)) {
 		out, err := fn()
-		status := "success"
+		status := statusSuccess
 		if err != nil {
 			status = "error"
 			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
@@ -525,9 +789,10 @@ func (s *Server) handleWorkflowSessionStart(ctx context.Context, req *Request) (
 
 	return &Response{Result: map[string]interface{}{
 		"workflow": "session_start",
-		"status":   "completed",
+		"status":   statusCompleted,
 		"steps":    steps,
 		"results":  results,
+		"message":  "Session initialized successfully with memory and context.",
 	}}, nil
 }
 
@@ -539,7 +804,7 @@ func (s *Server) handleWorkflowCheckpointCreate(ctx context.Context, req *Reques
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	steps := []WorkflowStep{}
@@ -547,7 +812,7 @@ func (s *Server) handleWorkflowCheckpointCreate(ctx context.Context, req *Reques
 
 	step := func(name string, fn func() (interface{}, error)) {
 		out, err := fn()
-		status := "success"
+		status := statusSuccess
 		if err != nil {
 			status = "error"
 			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
@@ -565,28 +830,29 @@ func (s *Server) handleWorkflowCheckpointCreate(ctx context.Context, req *Reques
 		})
 	})
 
-	step("standard_run_all", func() (interface{}, error) {
-		return s.callTool(ctx, "standard_run_all", map[string]interface{}{})
-	})
-
-	step("sast_run", func() (interface{}, error) {
-		return s.callTool(ctx, "sast_run", map[string]interface{}{
-			"path": ".",
+	step("tyr_snapshot", func() (interface{}, error) {
+		return s.callTool(ctx, "tyr_snapshot", map[string]interface{}{
+			"checkpoint_type": "manual_checkpoint",
 		})
 	})
 
-	step("precommit_validate", func() (interface{}, error) {
-		return s.callTool(ctx, "precommit_validate", map[string]interface{}{
-			"path": ".",
-		})
-	})
+	snapshot := results["tyr_snapshot"]
+	qualityMsg := "No quality data available."
+	if sm, ok := snapshot.(map[string]interface{}); ok {
+		score := sm["quality_score"].(float64)
+		findings := 0
+		if f, ok := sm["findings"].(map[string]interface{}); ok {
+			findings = int(f["total_active"].(float64))
+		}
+		qualityMsg = fmt.Sprintf("Calidad: %.1f/100 | Hallazgos activos: %d", qualityScore(score), findings)
+	}
 
 	step("human_review_create", func() (interface{}, error) {
 		return s.callTool(ctx, "human_review_create", map[string]interface{}{
 			"review_type": "checkpoint_approval",
 			"entity_type": "checkpoint",
 			"entity_id":   params.PlanID,
-			"question":    "¿Aprobar este checkpoint? Se han ejecutado: standards, SAST, precommit_validate",
+			"question":    fmt.Sprintf("¿Aprobar checkpoint? (%s)\nDescripción: %s", qualityMsg, params.Description),
 		})
 	})
 
@@ -633,14 +899,7 @@ func (s *Server) handleEcosystemDiagnose(ctx context.Context, req *Request) (*Re
 	}
 	json.Unmarshal(req.Params, &params)
 
-	diagnostics := map[string]interface{}{
-		"version": s.serverVersion,
-		"status":  "healthy",
-		"issues":  []string{},
-	}
-
 	issues := []string{}
-
 	if s.dbPaths == nil {
 		s.dbPaths = make(map[string]string)
 	}
@@ -653,7 +912,42 @@ func (s *Server) handleEcosystemDiagnose(ctx context.Context, req *Request) (*Re
 	}
 
 	stats, _ := s.getDatabaseStats()
-	diagnostics["database_stats"] = stats
+
+	// Tool diagnostics
+	toolCount := len(s.tools)
+	schemaCount := 0
+	descCount := 0
+	ghostHandlers := 0
+
+	for _, tool := range s.tools {
+		// Check schema
+		if tool.InputSchema != nil && len(tool.InputSchema) > 2 {
+			schemaCount++
+		}
+
+		// Check description length
+		if len(tool.Description) >= 80 {
+			descCount++
+		}
+
+		// Check handler
+		if _, ok := s.handlers[tool.Name]; !ok {
+			ghostHandlers++
+			issues = append(issues, fmt.Sprintf("ghost_handler: %s (no handler registered)", tool.Name))
+		}
+	}
+
+	diagnostics := map[string]interface{}{
+		"version":        s.serverVersion,
+		"status":         "healthy",
+		"database_stats": stats,
+		"tools": map[string]interface{}{
+			"total":           toolCount,
+			"with_schema":     schemaCount,
+			"with_desc_gt_80": descCount,
+			"ghost_handlers":  ghostHandlers,
+		},
+	}
 
 	if len(issues) > 0 {
 		diagnostics["status"] = "degraded"
@@ -765,7 +1059,7 @@ func (s *Server) handleWorkflowStackBasedInit(ctx context.Context, req *Request)
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.ProjectPath == "" {
@@ -777,7 +1071,7 @@ func (s *Server) handleWorkflowStackBasedInit(ctx context.Context, req *Request)
 
 	step := func(name string, fn func() (interface{}, error)) {
 		out, err := fn()
-		status := "success"
+		status := statusSuccess
 		if err != nil {
 			status = "error"
 			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
@@ -816,7 +1110,7 @@ func (s *Server) handleWorkflowStackBasedInit(ctx context.Context, req *Request)
 	}
 
 	phaseTemplates := scanner.GeneratePhasesAndTasks(analysis)
-	recommendedAgents := scanner.GetRecommendedAgents(analysis)
+	recommendedAgents := scanner.GetRecommendedAgents(analysis, nil)
 
 	phaseIDs := []string{}
 	taskIDs := []string{}
@@ -853,13 +1147,17 @@ func (s *Server) handleWorkflowStackBasedInit(ctx context.Context, req *Request)
 				}
 			}
 
-			taskResult, err := s.callTool(ctx, "task_create", map[string]interface{}{
+			taskParams := map[string]interface{}{
 				"phase_id":    phaseID,
 				"title":       taskTemplate.Title,
 				"description": taskTemplate.Description,
 				"priority":    taskTemplate.Priority,
 				"milestone":   taskTemplate.Milestone,
-			})
+			}
+			if len(agentIDsForTask) > 0 {
+				taskParams["agent_ids"] = agentIDsForTask
+			}
+			taskResult, err := s.callTool(ctx, "task_create", taskParams)
 			if err != nil {
 				steps = append(steps, WorkflowStep{Name: "task_create:" + taskTemplate.Title, Status: "error", Error: err.Error()})
 				continue
@@ -918,10 +1216,17 @@ func (s *Server) handleWorkflowPlanDevelopV2(ctx context.Context, req *Request) 
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
+	}
+
+	if params.PlanID == "" {
+		return nil, fmt.Errorf("plan_id is required")
 	}
 
 	steps := []WorkflowStep{}
+	taskExecutions := []map[string]interface{}{}
+	completedCount := 0
+	qualityChecks := []map[string]interface{}{}
 
 	for {
 		taskResult, err := s.callTool(ctx, "task_get_next", map[string]interface{}{
@@ -951,32 +1256,128 @@ func (s *Server) handleWorkflowPlanDevelopV2(ctx context.Context, req *Request) 
 
 		taskID := task["id"].(string)
 		taskTitle := task["title"].(string)
-		taskAgents, _ := task["task_agents"].([]interface{})
+		taskPhase := task["phase_title"]
 
-		steps = append(steps, WorkflowStep{Name: "task_start:" + taskTitle, Status: "in_progress"})
+		assignedAgentIDsRaw, hasAgents := task["assigned_agent_ids"].([]interface{})
+		taskExecution := map[string]interface{}{
+			"task_id": taskID,
+			"title":   taskTitle,
+			"phase":   taskPhase,
+			"status":  "in_progress",
+			"agents":  []string{},
+		}
 
-		if len(taskAgents) > 0 {
-			for _, ta := range taskAgents {
-				taMap, ok := ta.(map[string]interface{})
-				if !ok {
+		steps = append(steps, WorkflowStep{Name: "task_start:" + taskTitle, Status: "in_progress", Output: map[string]interface{}{"task_id": taskID, "title": taskTitle, "phase": taskPhase}})
+
+		var executedBy []string
+		var executionID string
+
+		if hasAgents && len(assignedAgentIDsRaw) > 0 {
+			for _, agentIDRaw := range assignedAgentIDsRaw {
+				agentID, ok := agentIDRaw.(string)
+				if !ok || agentID == "" {
 					continue
 				}
 				execResult, err := s.callTool(ctx, "task_execute", map[string]interface{}{
 					"task_id":  taskID,
-					"agent_id": taMap["agent_id"],
+					"agent_id": agentID,
 				})
 				if err != nil {
 					steps = append(steps, WorkflowStep{Name: "task_delegate:" + taskTitle, Status: "error", Error: err.Error()})
+					taskExecution["status"] = "error"
 				} else {
-					steps = append(steps, WorkflowStep{Name: "task_delegate:" + taskTitle, Status: "success", Output: execResult})
+					executedBy = append(executedBy, agentID)
+					if execResultMap, ok := execResult.(map[string]interface{}); ok {
+						if eid, ok := execResultMap["execution_id"].(string); ok {
+							executionID = eid
+						}
+					}
+					s.callTool(ctx, "task_update", map[string]interface{}{
+						"task_id": taskID,
+						"status":  "in_progress",
+						"notes":   "Delegated to " + agentID + " - awaiting completion",
+					})
+					steps = append(steps, WorkflowStep{Name: "task_delegate:" + taskTitle, Status: "in_progress", Output: execResult})
 				}
 			}
 		} else {
-			s.callTool(ctx, "task_update", map[string]interface{}{
-				"task_id": taskID,
-				"status":  "in_progress",
-			})
+			assignedType, _ := task["assigned_agent_type"].(string)
+			agentIDToUse := params.AgentID
+			if agentIDToUse == "" && assignedType != "" {
+				availableAgents, err := s.callTool(ctx, "agent_specialized_list", map[string]interface{}{
+					"agent_type": assignedType,
+				})
+				log.Printf("   [DEBUG] Looking for type=%s, result=%+v, err=%v", assignedType, availableAgents, err)
+				if err == nil {
+					if agentsMap, ok := availableAgents.(map[string]interface{}); ok {
+						if agents, ok := agentsMap["agents"].([]map[string]interface{}); ok && len(agents) > 0 {
+							agentIDToUse, _ = agents[0]["id"].(string)
+							log.Printf("   [DEBUG] Found agent of type %s: %s", assignedType, agentIDToUse)
+						}
+					}
+				}
+				if agentIDToUse == "" {
+					log.Printf("   [DEBUG] No agent of type %s, trying backend fallback", assignedType)
+					availableAgents, err := s.callTool(ctx, "agent_specialized_list", map[string]interface{}{
+						"agent_type": "backend",
+					})
+					log.Printf("   [DEBUG] Backend fallback result=%+v, err=%v", availableAgents, err)
+					if err == nil {
+						if agentsMap, ok := availableAgents.(map[string]interface{}); ok {
+							if agents, ok := agentsMap["agents"].([]map[string]interface{}); ok && len(agents) > 0 {
+								agentIDToUse, _ = agents[0]["id"].(string)
+								log.Printf("   [DEBUG] Using backend fallback agent: %s", agentIDToUse)
+							}
+						}
+					}
+				}
+			}
+
+			if agentIDToUse != "" {
+				execResult, err := s.callTool(ctx, "task_execute", map[string]interface{}{
+					"task_id":  taskID,
+					"agent_id": agentIDToUse,
+				})
+				if err != nil {
+					steps = append(steps, WorkflowStep{Name: "task_execute:" + taskTitle, Status: "error", Error: err.Error()})
+					taskExecution["status"] = "error"
+				} else {
+					executedBy = append(executedBy, agentIDToUse)
+					taskExecution["status"] = "in_progress"
+					if execResultMap, ok := execResult.(map[string]interface{}); ok {
+						if eid, ok := execResultMap["execution_id"].(string); ok {
+							executionID = eid
+						}
+					}
+					s.callTool(ctx, "task_update", map[string]interface{}{
+						"task_id": taskID,
+						"status":  "in_progress",
+						"notes":   "Assigned to " + agentIDToUse + " - execution_id: " + executionID + " - awaiting completion",
+					})
+					steps = append(steps, WorkflowStep{Name: "task_execute:" + taskTitle, Status: "in_progress", Output: map[string]interface{}{
+						"execution_id": executionID,
+						"task_id":      taskID,
+						"agent_id":     agentIDToUse,
+						"message":      "Tarea asignada. OpenCode debe ejecutar y llamar task_complete.",
+					}})
+				}
+			} else {
+				s.callTool(ctx, "task_update", map[string]interface{}{
+					"task_id": taskID,
+					"status":  "in_progress",
+					"notes":   "No agent assigned - requires manual assignment",
+				})
+				steps = append(steps, WorkflowStep{Name: "task_start:" + taskTitle, Status: "pending_agent", Output: map[string]interface{}{"task_id": taskID, "message": "No agent assigned"}})
+				taskExecution["status"] = "pending_agent"
+			}
 		}
+
+		taskExecution["agents"] = executedBy
+		if executionID != "" {
+			taskExecution["execution_id"] = executionID
+		}
+
+		taskExecution["agents"] = executedBy
 
 		if task["milestone"] == true {
 			s.callTool(ctx, "checkpoint_open", map[string]interface{}{
@@ -991,6 +1392,31 @@ func (s *Server) handleWorkflowPlanDevelopV2(ctx context.Context, req *Request) 
 			})
 		}
 
+		completedCount++
+		taskExecutions = append(taskExecutions, taskExecution)
+
+		// FENRIR: Save task assignment to memory (OpenCode must complete the actual work)
+		agentList := "agente(s)"
+		if len(executedBy) > 0 {
+			agentList = fmt.Sprintf("agente(s) %v", executedBy)
+		}
+		memSaveResult, _ := s.callTool(ctx, "mem_save", map[string]interface{}{
+			"title": "Tarea iniciada: " + taskTitle,
+			"type":  "task_started",
+			"what":  fmt.Sprintf("Tarea '%s' asignada a %s - ejecución en curso. OpenCode debe completar esta tarea.", taskTitle, agentList),
+			"where": taskPhase,
+			"why":   "Asignación de tarea en plan de desarrollo",
+		})
+		if memSaveResult != nil {
+			steps = append(steps, WorkflowStep{Name: "Fenrir: MemSave", Status: "success"})
+		}
+
+		// TYR: Run quality check after task
+		qualityResult, _ := s.callTool(ctx, "tyr_snapshot", map[string]interface{}{})
+		if qualityMap, ok := qualityResult.(map[string]interface{}); ok {
+			qualityChecks = append(qualityChecks, qualityMap)
+		}
+
 		if !params.AutoContinue {
 			break
 		}
@@ -1000,11 +1426,58 @@ func (s *Server) handleWorkflowPlanDevelopV2(ctx context.Context, req *Request) 
 
 	planProgress, _ := s.callTool(ctx, "plan_progress", map[string]interface{}{"plan_id": params.PlanID})
 
+	// FENRIR: Save overall session summary
+	s.callTool(ctx, "mem_save", map[string]interface{}{
+		"title": fmt.Sprintf("Sesión de desarrollo completada: %d tareas", completedCount),
+		"type":  "session_summary",
+		"what":  fmt.Sprintf("Se ejecutaron %d tareas en el plan %s", completedCount, params.PlanID),
+		"why":   "Ciclo de desarrollo",
+	})
+
+	displayMessage := fmt.Sprintf(`📋 **Resumen de Ejecución - Plan %s:**
+
+**Tareas procesadas:** %d
+
+**Detalle de ejecuciones:**
+%s
+
+**Checks de calidad:** %d realizados
+
+**Progreso del plan:**
+%s
+
+**Nota para OpenCode:** Cada tarea tiene un execution_id. Usa task_complete(execution_id, result="descripción del trabajo realizado") para marcar como completada.
+
+**Próximo paso:** Ejecutar las tareas con OpenCode y llamar task_complete para cada una.`,
+		params.PlanID, completedCount,
+		func() string {
+			out := ""
+			for _, t := range taskExecutions {
+				status := t["status"]
+				title := t["title"]
+				agents := t["agents"]
+				execID, _ := t["execution_id"].(string)
+				if execID != "" {
+					out += fmt.Sprintf("  • %s → %v (%s) [exec_id: %s]\n", title, agents, status, execID)
+				} else {
+					out += fmt.Sprintf("  • %s → %v (%s)\n", title, agents, status)
+				}
+			}
+			return out
+		}(),
+		len(qualityChecks),
+		planProgress)
+
 	return &Response{Result: map[string]interface{}{
-		"workflow": "plan_develop_v2",
-		"status":   "completed",
-		"progress": planProgress,
-		"steps":    steps,
+		"workflow":        "plan_develop_v2",
+		"status":          statusCompleted,
+		"tasks_executed":  completedCount,
+		"task_executions": taskExecutions,
+		"quality_checks":  qualityChecks,
+		"progress":        planProgress,
+		"steps":           steps,
+		"display_to_user": displayMessage,
+		"message":         displayMessage,
 	}}, nil
 }
 
@@ -1132,54 +1605,44 @@ func findAgentByType(agentType string, agents []map[string]string) string {
 }
 
 func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Request) (*Response, error) {
-	log.Printf("   [ROOT] handleWorkflowProjectLifecycle called")
 	var params struct {
-		ProjectPath  string   `json:"project_path"`
-		PRDFile      string   `json:"prd_file,omitempty"`
-		Title        string   `json:"title,omitempty"`
-		Requirements []string `json:"requirements,omitempty"`
-		AutoStart    bool     `json:"auto_start"`
+		PRDFile     string `json:"prd_file,omitempty"`
+		ProjectPath string `json:"project_path"`
+		Title       string `json:"title,omitempty"`
+		AutoStart   bool   `json:"auto_start"`
+		LLMResponse string `json:"llm_response,omitempty"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.ProjectPath == "" {
-		return nil, fmt.Errorf("project_path is required")
+		params.ProjectPath = "."
 	}
 
 	steps := []WorkflowStep{}
 	results := map[string]interface{}{}
 	startTime := time.Now()
 
-	// Helper to check if we are approaching IDE timeout (safe margin: 40s)
 	shouldBreak := func() bool {
 		return time.Since(startTime) > 40*time.Second
 	}
 
 	step := func(name string, fn func() (interface{}, error)) {
-		log.Printf("   [STEP] step() called for: %s", name)
 		if shouldBreak() {
-			log.Printf("   [STEP] %s SKIPPED - shouldBreak()=true", name)
 			return
 		}
-		log.Printf("   [STEP] %s executing...", name)
 		out, err := fn()
-		status := "success"
+		status := statusSuccess
 		if err != nil {
 			status = "error"
-			log.Printf("   [STEP] %s returned error: %v", name, err)
 			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
 		} else {
-			log.Printf("   [STEP] %s completed successfully", name)
-			steps = append(steps, WorkflowStep{Name: name, Status: status, Output: out})
+			steps = append(steps, WorkflowStep{Name: name, Status: statusSuccess, Output: out})
 		}
 		results[name] = out
 	}
-
-	log.Printf("🔄 Project Lifecycle: Starting integrated full cycle")
-	log.Printf("   Project: %s", params.ProjectPath)
 
 	// 1. Fenrir: Analysis
 	step("Fenrir: Analyze Project Context", func() (interface{}, error) {
@@ -1189,194 +1652,150 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 	scanResult := results["Fenrir: Analyze Project Context"]
 	analysis, _ := parseProjectAnalysis(scanResult)
 
-	var projectName string
-	if params.Title != "" {
-		projectName = params.Title
-	} else if analysis != nil {
+	projectName := params.Title
+	if projectName == "" && analysis != nil {
 		projectName = analysis.Name
-	} else {
+	}
+	if projectName == "" {
 		projectName = "Unnamed Project"
 	}
 
-	// 2. Fenrir: PRD Analysis (Check if already parsed)
+	// 2. Fenrir: PRD Analysis
 	var prdID string
 	if params.PRDFile != "" && !shouldBreak() {
-		// Optimization: Check if this PRD was already analyzed recently
-		existingPRDs, _ := s.callTool(ctx, "mem_search", map[string]interface{}{
-			"query": params.PRDFile,
-			"type":  "prd_id",
-		})
-
-		if prdMap, ok := existingPRDs.(map[string]interface{}); ok {
-			if matches, ok := prdMap["matches"].([]interface{}); ok && len(matches) > 0 {
-				if first, ok := matches[0].(map[string]interface{}); ok {
-					prdID, _ = first["content"].(string)
-					log.Printf("   PRD already analyzed: %s", prdID)
-					steps = append(steps, WorkflowStep{Name: "Fenrir: Parse PRD Requirements", Status: "success", Output: "Resumed from memory"})
-				}
-			}
-		}
-
-		if prdID == "" {
-			step("Fenrir: Parse PRD Requirements", func() (interface{}, error) {
+		if id, ok := s.getExistingPRD(ctx, params.PRDFile); ok {
+			prdID = id
+			steps = append(steps, WorkflowStep{Name: logParsePRD, Status: statusSuccess, Output: "Resumed from memory"})
+		} else {
+			step(logParsePRD, func() (interface{}, error) {
 				return s.callTool(ctx, "prd_parse", map[string]interface{}{"file_path": params.PRDFile})
 			})
 
-			prdResult := results["Fenrir: Parse PRD Requirements"]
+			prdResult := results[logParsePRD]
 			if prdMap, ok := prdResult.(map[string]interface{}); ok {
 				if id, ok := prdMap["prd_id"].(string); ok {
 					prdID = id
-
-					// Optimization: save all requirements in a single batch to avoid IDE timeouts
-					if reqs, ok := prdMap["requirements"].([]interface{}); ok && len(reqs) > 0 {
-						reqsJSON, _ := json.Marshal(reqs)
-						s.callTool(ctx, "mem_save", map[string]interface{}{
-							"content":  string(reqsJSON),
-							"type":     "requirement_batch",
-							"metadata": map[string]string{"project": projectName, "source": "prd_parse", "prd_file": params.PRDFile},
-						})
-						// Also save the PRD ID for future resumes
-						s.callTool(ctx, "mem_save", map[string]interface{}{
-							"content":  id,
-							"type":     "prd_id",
-							"metadata": map[string]string{"file": params.PRDFile},
-						})
+					if reqs, ok := prdMap["requirements"].([]interface{}); ok {
+						s.savePRDRequirements(ctx, prdID, params.PRDFile, projectName, reqs)
 					}
 				}
 			}
 		}
 	}
 
-	// 2b. Skoll: Generate Rules from Non-Functional Requirements
-	log.Printf("   [RULEGEN] === Rule Generation Step Starting ===")
-	log.Printf("   [RULEGEN] shouldBreak()=%v, elapsed=%v", shouldBreak(), time.Since(startTime))
-	if !shouldBreak() {
-		step("Skoll: Generate Rules from PRD", func() (interface{}, error) {
-			log.Printf("   [RULEGEN] Inside step closure, looking up prdResult...")
-			prdResult := results["Fenrir: Parse PRD Requirements"]
-			log.Printf("   [RULEGEN] prdResult type=%T, isNil=%v", prdResult, prdResult == nil)
-			if prdResult == nil {
-				log.Printf("   [RULEGEN] WARNING: prdResult is nil! results has %d keys", len(results))
-				return nil, fmt.Errorf("prdResult is nil: Fenrir step may have failed")
-			}
-			prdMap, ok := prdResult.(map[string]interface{})
-			if !ok {
-				log.Printf("   [RULEGEN] ERROR: prdResult is not map[string]interface{}, it's %T", prdResult)
-				return nil, fmt.Errorf("prdResult type mismatch: got %T", prdResult)
-			}
-			reqsRaw, ok := prdMap["requirements"]
-			if !ok {
-				log.Printf("   [RULEGEN] No 'requirements' key found in prdMap")
-				return nil, nil
-			}
-			var reqsFormatted []map[string]string
-			switch r := reqsRaw.(type) {
-			case []map[string]string:
-				reqsFormatted = r
-			case []interface{}:
-				reqsFormatted = make([]map[string]string, 0, len(r))
-				for _, item := range r {
-					if rm, ok := item.(map[string]interface{}); ok {
-						reqsFormatted = append(reqsFormatted, map[string]string{
-							"id":    fmt.Sprintf("%v", rm["id"]),
-							"type":  fmt.Sprintf("%v", rm["type"]),
-							"title": fmt.Sprintf("%v", rm["title"]),
-						})
-					}
-				}
-			default:
-				log.Printf("   [RULEGEN] ERROR: requirements is %T, expected []map[string]string or []interface{}", reqsRaw)
-				return nil, fmt.Errorf("requirements type mismatch: got %T", reqsRaw)
-			}
-			if len(reqsFormatted) == 0 {
-				log.Printf("   [RULEGEN] No requirements found after type conversion")
-				return nil, nil
-			}
-			log.Printf("   [RULEGEN] Found %d requirements, formatting...", len(reqsFormatted))
-			log.Printf("   [RULEGEN] Calling rule_create_from_prd with %d requirements", len(reqsFormatted))
-			result, err := s.callTool(ctx, "rule_create_from_prd", map[string]interface{}{
-				"requirements": reqsFormatted,
-				"project_path": params.ProjectPath,
-			})
-			if err != nil {
-				log.Printf("   [RULEGEN] rule_create_from_prd returned error: %v", err)
-			} else {
-				log.Printf("   [RULEGEN] rule_create_from_prd succeeded, result type=%T", result)
-			}
-			return result, err
-		})
-	} else {
-		log.Printf("   [RULEGEN] shouldBreak=true, skipping rule generation step")
-	}
-	log.Printf("   [RULEGEN] === Rule Generation Step Complete ===")
-
-	// 3. Skoll: Structure Setup (Check if team exists)
-	agentIDs := []string{}
+	// 3. Skoll: Create Specialized Agent Team
+	var agentIDs []string
+	var teamID string
 	typeToAgentID := make(map[string]string)
+	var pendingLLM bool
+	var llmPrompt, llmInstructions string
 	if !shouldBreak() {
-		existingTeams, _ := s.callTool(ctx, "team_list", map[string]interface{}{})
-		if teamMap, ok := existingTeams.(map[string]interface{}); ok {
-			if teams, ok := teamMap["teams"].([]interface{}); ok {
-				for _, t := range teams {
-					if tm, ok := t.(map[string]interface{}); ok {
-						if tm["name"] == projectName+" Team" {
-							log.Printf("   Team already exists, resuming...")
-							if ids, ok := tm["agent_ids"].([]interface{}); ok {
-								for _, id := range ids {
-									if sid, ok := id.(string); ok {
-										agentIDs = append(agentIDs, sid)
-									}
-								}
-							}
-							steps = append(steps, WorkflowStep{Name: "Skoll: Create Specialized Agent Team", Status: "success", Output: "Resumed from existing team"})
-							break
-						}
-					}
-				}
-			}
-		}
-
-		if len(agentIDs) == 0 {
+		if ids, ok := s.getExistingTeam(ctx, projectName+" Team"); ok {
+			agentIDs = ids
+			steps = append(steps, WorkflowStep{Name: "Skoll: Create Specialized Agent Team", Status: statusSuccess, Output: "Resumed from existing team"})
+		} else {
 			step("Skoll: Create Specialized Agent Team", func() (interface{}, error) {
-				if analysis == nil {
-					analysis = &scanner.ProjectAnalysis{Architecture: &scanner.ArchitectureInfo{}, Stack: &scanner.StackInfo{}}
-				}
-				recommendations := scanner.GetRecommendedAgents(analysis)
+				prdResult := results[logParsePRD]
+				requirements := extractRequirements(prdResult)
 
-				createdIDs := []string{}
-				for _, rec := range recommendations {
-					recName := rec["name"]
-					recType := rec["type"]
+				var ids []string
+				var tid string
+				var tMap map[string]string
+				var err error
 
-					agentResult, err := s.callTool(ctx, "agent_create", map[string]interface{}{
-						"name":       recName,
-						"agent_type": recType,
-						"skills":     []string{rec["role"]},
-					})
-
-					if err == nil {
-						if agentMap, ok := agentResult.(map[string]interface{}); ok {
-							if id, ok := agentMap["agent_id"].(string); ok {
-								createdIDs = append(createdIDs, id)
-								typeToAgentID[recType] = id
+				if params.LLMResponse != "" {
+					ids, tid, tMap, err = s.setupTeam(ctx, analysis, requirements, params.ProjectPath, projectName, params.LLMResponse)
+					if err == nil && len(ids) > 0 {
+						agentIDs = ids
+						teamID = tid
+						typeToAgentID = tMap
+						if teamID == "" && len(agentIDs) > 0 {
+							teamResult, _ := s.callTool(ctx, "team_create", map[string]interface{}{
+								"name":         projectName + " Team",
+								"project_path": params.ProjectPath,
+								"agent_ids":    agentIDs,
+							})
+							if teamMap, ok := teamResult.(map[string]interface{}); ok {
+								teamID, _ = teamMap["team_id"].(string)
 							}
 						}
+						return map[string]interface{}{"team_id": teamID, "agent_ids": agentIDs, "recommendation_source": "llm"}, nil
+					}
+					if err != nil {
+						return nil, err
 					}
 				}
 
-				teamResult, _ := s.callTool(ctx, "team_create", map[string]interface{}{
-					"name":         projectName + " Team",
-					"project_path": params.ProjectPath,
-					"agent_ids":    createdIDs,
-				})
-
-				agentIDs = createdIDs
-				return teamResult, nil
+				ids, tid, tMap, err = s.setupTeam(ctx, analysis, requirements, params.ProjectPath, projectName)
+				agentIDs = ids
+				teamID = tid
+				typeToAgentID = tMap
+				if source, hasSource := tMap["recommendation_source"]; hasSource && source == "pending_llm" {
+					pendingLLM = true
+					llmPrompt = fmt.Sprintf("%v", tMap["llm_prompt"])
+					llmInstructions = fmt.Sprintf("%v", tMap["llm_instructions"])
+				}
+				return map[string]interface{}{"team_id": teamID, "agent_ids": agentIDs}, err
 			})
 		}
 	}
 
-	// 3b. Fenrir: Bootstrap Project Structure
+	if pendingLLM {
+		pendingDisplayMessage := fmt.Sprintf(`📋 **Análisis LLM Requerido:**
+
+El sistema necesita que ejecutes el análisis LLM para determinar los agentes especializados requeridos.
+
+**Proyecto**: %s
+**Path**: %s
+
+**Próximo paso**: Ejecuta el prompt LLM y pasa la respuesta a analyze_stack_with_llm para crear los agentes.`,
+			projectName, params.ProjectPath)
+
+		return &Response{Result: map[string]interface{}{
+			"workflow":              "project_lifecycle",
+			"status":                "pending_llm",
+			"prd_id":                prdID,
+			"recommendation_source": "pending_llm",
+			"llm_prompt":            llmPrompt,
+			"llm_instructions":      llmInstructions,
+			"project_name":          projectName,
+			"project_path":          params.ProjectPath,
+			"stack_detected":        analysis != nil,
+			"steps":                 steps,
+			"results":               results,
+			"message":               pendingDisplayMessage,
+			"display_to_user":       pendingDisplayMessage,
+		}}, nil
+	}
+
+	// 4. Tyr: Quality Scan
+	if !shouldBreak() {
+		step("Tyr: Run Security and Quality Baseline", func() (interface{}, error) {
+			return s.callTool(ctx, "sast_run", map[string]interface{}{"path": params.ProjectPath})
+		})
+	}
+
+	// 5. Hati: Planning
+	var planID string
+	planTitle := projectName + logExecutionPlan
+	if !shouldBreak() {
+		if id, ok := s.getExistingPlan(ctx, planTitle); ok {
+			planID = id
+			steps = append(steps, WorkflowStep{Name: logGeneratePlan, Status: statusSuccess, Output: "Resumed from existing plan"})
+		} else if prdID != "" {
+			step(logGeneratePlan, func() (interface{}, error) {
+				return s.callTool(ctx, "plan_create_from_prd", map[string]interface{}{
+					"prd_id":       prdID,
+					"project_path": params.ProjectPath,
+					"title":        planTitle,
+				})
+			})
+			planResult := results[logGeneratePlan]
+			planID, _ = extractPlanID(planResult)
+		}
+	}
+
+	// 5b. Fenrir: Bootstrap
 	if !shouldBreak() && params.ProjectPath != "" {
 		step("Fenrir: Bootstrap Project Structure", func() (interface{}, error) {
 			return s.callTool(ctx, "project_bootstrap", map[string]interface{}{
@@ -1385,79 +1804,16 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 		})
 	}
 
-	// 4. Tyr: Initial Quality Scan
-	if !shouldBreak() {
-		step("Tyr: Run Security and Quality Baseline", func() (interface{}, error) {
-			sastResult, _ := s.callTool(ctx, "sast_run", map[string]interface{}{"path": params.ProjectPath})
-			return sastResult, nil
-		})
-	}
-
-	// 5. Hati: Planning and Assignment
-	var planID string
-	if !shouldBreak() {
-		if prdID != "" {
-			step("Hati: Generate Development Plan", func() (interface{}, error) {
-				stackInfo, archInfo := getStackInfoSafe(analysis)
-				return s.callTool(ctx, "plan_create_from_prd", map[string]interface{}{
-					"prd_id":      prdID,
-					"title":       projectName + " Execution Plan",
-					"description": fmt.Sprintf("Auto-generated plan based on PRD and project scan (Stack: %s, Arch: %s)", stackInfo, archInfo),
-				})
-			})
-			planResult := results["Hati: Generate Development Plan"]
-			if planMap, ok := planResult.(map[string]interface{}); ok {
-				if id, ok := planMap["id"].(string); ok {
-					planID = id
-				}
-			}
-		} else {
-			existingPlans, _ := s.callTool(ctx, "plan_list", map[string]interface{}{"status": "all"})
-			if pMap, ok := existingPlans.(map[string]interface{}); ok {
-				if plans, ok := pMap["plans"].([]interface{}); ok {
-					for _, p := range plans {
-						if pm, ok := p.(map[string]interface{}); ok {
-							if pm["title"] == projectName+" Execution Plan" {
-								planID, _ = pm["id"].(string)
-								log.Printf("   Plan already exists: %s", planID)
-								steps = append(steps, WorkflowStep{Name: "Hati: Generate Development Plan", Status: "success", Output: "Resumed from existing plan"})
-								break
-							}
-						}
-					}
-				}
-			}
-
-			if planID == "" {
-				step("Hati: Generate Development Plan", func() (interface{}, error) {
-					stackInfo, archInfo := getStackInfoSafe(analysis)
-					return s.callTool(ctx, "plan_create", map[string]interface{}{
-						"title":       projectName + " Execution Plan",
-						"description": fmt.Sprintf("Auto-generated plan based on project scan (Stack: %s, Arch: %s)", stackInfo, archInfo),
-					})
-				})
-				planResult := results["Hati: Generate Development Plan"]
-				if planMap, ok := planResult.(map[string]interface{}); ok {
-					if id, ok := planMap["id"].(string); ok {
-						planID = id
-					}
-				}
-			}
-		}
-	}
-
-	// 6. Phases and Tasks creation (Only if plan was found/created)
+	// 6. Phases and Tasks creation
 	taskCount := 0
 	assignmentCount := 0
 	if planID != "" && !shouldBreak() {
-		// Check if phases already exist to avoid duplication
 		existingPhases, _ := s.callTool(ctx, "plan_progress", map[string]interface{}{"plan_id": planID})
 		hasData := false
 		if epMap, ok := existingPhases.(map[string]interface{}); ok {
 			if count, ok := epMap["total_tasks"].(int); ok && count > 0 {
 				hasData = true
 				taskCount = count
-				log.Printf("   Plan already has %d tasks, skipping creation.", count)
 			}
 		}
 
@@ -1477,34 +1833,21 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 					if phaseMap, ok := phaseResult.(map[string]interface{}); ok {
 						if phaseID, ok := phaseMap["id"].(string); ok {
 							for _, taskTpl := range phaseTpl.Tasks {
-								taskCount++
-								taskResult, tErr := s.callTool(ctx, "task_create", map[string]interface{}{
+								taskAgentIDs := []string{}
+								for _, tType := range taskTpl.AgentTypes {
+									if aID, ok := typeToAgentID[tType]; ok {
+										taskAgentIDs = append(taskAgentIDs, aID)
+									}
+								}
+								s.callTool(ctx, "task_create", map[string]interface{}{
 									"phase_id":    phaseID,
 									"title":       taskTpl.Title,
 									"description": taskTpl.Description,
-									"priority":    taskTpl.Priority,
-									"milestone":   taskTpl.Milestone,
+									"agent_ids":   taskAgentIDs,
 								})
-
-								if tErr == nil {
-									if tMap, ok := taskResult.(map[string]interface{}); ok {
-										if taskID, ok := tMap["id"].(string); ok {
-											// ASIGNACIÓN AUTOMÁTICA
-											taskAgentIDs := []string{}
-											for _, tType := range taskTpl.AgentTypes {
-												if aID, ok := typeToAgentID[tType]; ok {
-													taskAgentIDs = append(taskAgentIDs, aID)
-												}
-											}
-											if len(taskAgentIDs) > 0 {
-												s.callTool(ctx, "task_assign_agents", map[string]interface{}{
-													"task_id":   taskID,
-													"agent_ids": taskAgentIDs,
-												})
-												assignmentCount++
-											}
-										}
-									}
+								taskCount++
+								if len(taskAgentIDs) > 0 {
+									assignmentCount++
 								}
 							}
 						}
@@ -1514,42 +1857,28 @@ func (s *Server) handleWorkflowProjectLifecycle(ctx context.Context, req *Reques
 		}
 	}
 
-	// 7. Final Monitoring and Approval
-	if planID != "" && !shouldBreak() {
-		reviewQuestion := fmt.Sprintf("¿Deseas iniciar el desarrollo para '%s'? Se han creado %d agentes y %d tareas asignadas.", projectName, len(agentIDs), taskCount)
-		step("Hati: Create Initial Review", func() (interface{}, error) {
-			return s.callTool(ctx, "human_review_create", map[string]interface{}{
-				"review_type": "project_start",
-				"entity_type": "plan",
-				"entity_id":   planID,
-				"question":    reviewQuestion,
-			})
-		})
-	}
-
-	status := "completed"
-	msg := "Integrated lifecycle complete. System is ready and waiting for human approval to start execution."
+	status := statusCompleted
 	if shouldBreak() {
-		status = "partial"
-		msg = "Workflow paused to avoid IDE timeout. Please call this tool again to resume from where it left off. State has been preserved."
+		status = "timeout_partial"
 	}
 
+	agentInfo := []string{}
+	for t, id := range typeToAgentID {
+		agentInfo = append(agentInfo, fmt.Sprintf("%s-agent (ID: %s)", t, id))
+	}
+
+	displayMessage := fmt.Sprintf("✅ Proyecto orquestado: %s. %d tareas creadas/encontradas.", projectName, taskCount)
 	response := map[string]interface{}{
-		"workflow":     "project_lifecycle",
-		"status":       status,
-		"project_name": projectName,
-		"plan_id":      planID,
-		"prd_id":       prdID,
-		"agent_count":  len(agentIDs),
-		"task_count":   taskCount,
-		"assignments":  assignmentCount,
-		"steps":        steps,
-		"auto_start":   params.AutoStart,
-		"message":      msg,
-		"elapsed_time": time.Since(startTime).String(),
+		"workflow":        "project_lifecycle",
+		"status":          status,
+		"project_name":    projectName,
+		"plan_id":         planID,
+		"task_count":      taskCount,
+		"agents":          agentInfo,
+		"display_to_user": displayMessage,
 	}
 
-	if params.AutoStart && planID != "" && status == "completed" {
+	if params.AutoStart && planID != "" && status == statusCompleted {
 		response["next_step"] = "rag continue --plan " + planID
 	}
 
@@ -1580,4 +1909,322 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+func qualityScore(val interface{}) float64 {
+	switch v := val.(type) {
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	default:
+		return 0.0
+	}
+}
+
+func (s *Server) handleWorkflowOnboardExisting(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		ProjectPath string `json:"project_path"`
+		Goal        string `json:"goal,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf(errFailedParseParams, err)
+	}
+
+	if params.ProjectPath == "" {
+		return nil, fmt.Errorf("project_path is required")
+	}
+
+	steps := []WorkflowStep{}
+	results := map[string]interface{}{}
+	startTime := time.Now()
+
+	shouldBreak := func() bool {
+		return time.Since(startTime) > 50*time.Second
+	}
+
+	step := func(name string, fn func() (interface{}, error)) {
+		if shouldBreak() {
+			return
+		}
+		out, err := fn()
+		status := "success"
+		if err != nil {
+			status = "error"
+			steps = append(steps, WorkflowStep{Name: name, Status: status, Error: err.Error()})
+		} else {
+			steps = append(steps, WorkflowStep{Name: name, Status: statusSuccess, Output: out})
+		}
+		results[name] = out
+	}
+
+	log.Printf("🔄 Onboarding Existing Project: %s", params.ProjectPath)
+
+	// 1. Scan project
+	step("project_scan", func() (interface{}, error) {
+		return s.callTool(ctx, "project_scan", map[string]interface{}{"path": params.ProjectPath})
+	})
+
+	// 2. Memory Summary
+	step("mem_project_summary", func() (interface{}, error) {
+		return s.callTool(ctx, "mem_project_summary", map[string]interface{}{"project_path": params.ProjectPath})
+	})
+
+	// 3. Spec Save (Architecture findings)
+	scanResult := results["project_scan"]
+	if scanResult != nil && !shouldBreak() {
+		step("spec_save", func() (interface{}, error) {
+			contentJSON, _ := json.MarshalIndent(scanResult, "", "  ")
+			return s.callTool(ctx, "spec_save", map[string]interface{}{
+				"name":        "Initial Architecture Scan",
+				"description": "Auto-generated architecture documentation from project onboarding scan",
+				"content":     fmt.Sprintf("## Architecture Findings\n\n```json\n%s\n```", string(contentJSON)),
+			})
+		})
+	}
+
+	// 4. Skill Generate
+	step("skill_generate", func() (interface{}, error) {
+		return s.callTool(ctx, "skill_generate", map[string]interface{}{"project_path": params.ProjectPath})
+	})
+
+	// 5. Rules Generate
+	step("rules_generate", func() (interface{}, error) {
+		return s.callTool(ctx, "rules_generate", map[string]interface{}{"project_path": params.ProjectPath})
+	})
+
+	// 6. Quality Bootstrap
+	step("tyr_bootstrap", func() (interface{}, error) {
+		return s.callTool(ctx, "tyr_bootstrap", map[string]interface{}{"project_path": params.ProjectPath})
+	})
+
+	// 7. Initial SAST
+	step("sast_run", func() (interface{}, error) {
+		return s.callTool(ctx, "sast_run", map[string]interface{}{"path": params.ProjectPath})
+	})
+
+	status := "completed"
+	if shouldBreak() {
+		status = "partial_timeout"
+	}
+
+	return &Response{Result: WorkflowResult{
+		Workflow: "workflow_onboard_existing",
+		Status:   status,
+		Steps:    steps,
+		Results:  results,
+	}}, nil
+}
+
+// Helpers for handleWorkflowPRDAnalyze to reduce complexity
+
+func extractPRDMetadata(prdResult interface{}) (string, string) {
+	if prdMap, ok := prdResult.(map[string]interface{}); ok {
+		id, _ := prdMap["prd_id"].(string)
+		summary, _ := prdMap["contextual_summary"].(string)
+		return id, summary
+	}
+	return "", ""
+}
+
+func extractPlanID(planResult interface{}) (string, bool) {
+	if planMap, ok := planResult.(map[string]interface{}); ok {
+		id, ok := planMap["plan_id"].(string)
+		return id, ok
+	}
+	return "", false
+}
+
+func extractRequirements(prdResult interface{}) []map[string]string {
+	var requirements []map[string]string
+	if prdResult == nil {
+		return requirements
+	}
+
+	prdMap, ok := prdResult.(map[string]interface{})
+	if !ok {
+		return requirements
+	}
+
+	if reqs, ok := prdMap["requirements"].([]map[string]string); ok {
+		return reqs
+	}
+
+	if reqsRaw, ok := prdMap["requirements"].([]interface{}); ok {
+		for _, r := range reqsRaw {
+			if reqMap, ok := r.(map[string]interface{}); ok {
+				req := map[string]string{}
+				if t, ok := reqMap["type"].(string); ok {
+					req["type"] = t
+				}
+				if title, ok := reqMap["title"].(string); ok {
+					req["title"] = title
+				}
+				if id, ok := reqMap["id"].(string); ok {
+					req["id"] = id
+				}
+				requirements = append(requirements, req)
+			}
+		}
+	}
+	return requirements
+}
+
+func (s *Server) setupTeam(ctx context.Context, analysis *scanner.ProjectAnalysis, requirements []map[string]string, projectPath, projectName string, llmResponse ...string) ([]string, string, map[string]string, error) {
+	var createdAgentIDs []string
+	var teamID string
+	typeToAgentID := make(map[string]string)
+	recommendations := scanner.GetRecommendedAgents(analysis, requirements)
+
+	if len(llmResponse) > 0 && llmResponse[0] != "" {
+		llmResult, err := scanner.ParseLLMAnalysisResponse(llmResponse[0])
+		if err == nil && len(llmResult.RecommendedAgents) > 0 {
+			recommendations = []map[string]string{}
+			for _, agent := range llmResult.RecommendedAgents {
+				recommendations = append(recommendations, map[string]string{
+					"name":  agent["name"],
+					"type":  agent["type"],
+					"role":  agent["role"],
+					"scope": agent["scope"],
+				})
+			}
+			typeToAgentID["recommendation_source"] = "llm"
+		}
+	} else {
+		analyzeResult, err := s.callTool(ctx, "analyze_stack_with_llm", map[string]interface{}{
+			"project_path": projectPath,
+			"requirements": requirements,
+		})
+		if err == nil {
+			if resultMap, ok := analyzeResult.(map[string]interface{}); ok {
+				if agents, ok := resultMap["agents"].([]map[string]string); ok && len(agents) > 0 {
+					recommendations = agents
+					typeToAgentID["recommendation_source"] = "llm"
+				} else if prompt, hasPrompt := resultMap["llm_prompt"].(string); hasPrompt && prompt != "" {
+					typeToAgentID["llm_prompt"] = prompt
+					typeToAgentID["recommendation_source"] = "pending_llm"
+					typeToAgentID["has_analysis"] = fmt.Sprintf("%v", resultMap["has_analysis"])
+					typeToAgentID["requirements_count"] = fmt.Sprintf("%v", resultMap["requirements_count"])
+					if instructions, hasInstr := resultMap["instructions"].(string); hasInstr {
+						typeToAgentID["llm_instructions"] = instructions
+					}
+					if projectName == "" {
+						projectName = "Project"
+					}
+					typeToAgentID["project_name"] = projectName
+					typeToAgentID["project_path"] = projectPath
+					return []string{}, "", typeToAgentID, nil
+				}
+			}
+		}
+	}
+
+	for _, rec := range recommendations {
+		recName := fmt.Sprintf("%v", rec["name"])
+		recType := fmt.Sprintf("%v", rec["type"])
+		recRole := fmt.Sprintf("%v", rec["role"])
+
+		agentResult, err := s.callTool(ctx, "agent_create", map[string]interface{}{
+			"name":       recName,
+			"agent_type": recType,
+			"skills":     []string{recRole},
+		})
+
+		if err == nil {
+			if agentMap, ok := agentResult.(map[string]interface{}); ok {
+				if id, ok := getAgentIDFromResult(agentMap); ok {
+					createdAgentIDs = append(createdAgentIDs, id)
+					typeToAgentID[recType] = id
+				}
+			}
+		}
+	}
+
+	if len(createdAgentIDs) > 0 {
+		teamResult, _ := s.callTool(ctx, "team_create", map[string]interface{}{
+			"name":         projectName + " Team",
+			"project_path": projectPath,
+			"agent_ids":    createdAgentIDs,
+		})
+		if teamMap, ok := teamResult.(map[string]interface{}); ok {
+			teamID, _ = teamMap["team_id"].(string)
+		}
+	}
+
+	return createdAgentIDs, teamID, typeToAgentID, nil
+}
+
+func (s *Server) getExistingPRD(ctx context.Context, prdFile string) (string, bool) {
+	existingPRDs, _ := s.callTool(ctx, "mem_search", map[string]interface{}{
+		"query": prdFile,
+		"type":  "prd_id",
+	})
+
+	if prdMap, ok := existingPRDs.(map[string]interface{}); ok {
+		if matches, ok := prdMap["matches"].([]interface{}); ok && len(matches) > 0 {
+			if first, ok := matches[0].(map[string]interface{}); ok {
+				prdID, ok := first["content"].(string)
+				return prdID, ok
+			}
+		}
+	}
+	return "", false
+}
+
+func (s *Server) savePRDRequirements(ctx context.Context, prdID, prdFile, projectName string, requirements []interface{}) {
+	if len(requirements) == 0 {
+		return
+	}
+	reqsJSON, _ := json.Marshal(requirements)
+	s.callTool(ctx, "mem_save", map[string]interface{}{
+		"content":  string(reqsJSON),
+		"type":     "requirement_batch",
+		"metadata": map[string]string{"project": projectName, "source": "prd_parse", "prd_file": prdFile},
+	})
+	s.callTool(ctx, "mem_save", map[string]interface{}{
+		"content":  prdID,
+		"type":     "prd_id",
+		"metadata": map[string]string{"file": prdFile},
+	})
+}
+
+func (s *Server) getExistingTeam(ctx context.Context, teamName string) ([]string, bool) {
+	existingTeams, _ := s.callTool(ctx, "team_list", map[string]interface{}{})
+	if teamMap, ok := existingTeams.(map[string]interface{}); ok {
+		if teams, ok := teamMap["teams"].([]interface{}); ok {
+			for _, t := range teams {
+				if tm, ok := t.(map[string]interface{}); ok {
+					if tm["name"] == teamName {
+						var ids []string
+						if agentIDs, ok := tm["agent_ids"].([]interface{}); ok {
+							for _, id := range agentIDs {
+								if sid, ok := id.(string); ok {
+									ids = append(ids, sid)
+								}
+							}
+						}
+						return ids, true
+					}
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
+func (s *Server) getExistingPlan(ctx context.Context, planTitle string) (string, bool) {
+	existingPlans, _ := s.callTool(ctx, "plan_list", map[string]interface{}{})
+	if planMap, ok := existingPlans.(map[string]interface{}); ok {
+		if plans, ok := planMap["plans"].([]interface{}); ok {
+			for _, p := range plans {
+				if pm, ok := p.(map[string]interface{}); ok {
+					if pm["title"] == planTitle {
+						id, ok := pm["plan_id"].(string)
+						return id, ok
+					}
+				}
+			}
+		}
+	}
+	return "", false
 }
