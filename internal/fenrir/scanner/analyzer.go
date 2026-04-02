@@ -1170,6 +1170,176 @@ func (a *ProjectAnalyzer) resolveDependencies(analysis *ProjectAnalysis) {
 	}
 }
 
+type TaskExecutionPrompt struct {
+	TaskID         string            `json:"task_id"`
+	Title          string            `json:"title"`
+	Description    string            `json:"description"`
+	PhaseName      string            `json:"phase_name"`
+	ProjectPath    string            `json:"project_path"`
+	AgentType      string            `json:"agent_type"`
+	Instructions   string            `json:"instructions"`
+	ContextFiles   []string          `json:"context_files,omitempty"`
+	PRDRequirement map[string]string `json:"prd_requirement,omitempty"`
+}
+
+func GenerateTaskExecutionPrompt(task map[string]interface{}, projectPath string, phaseName string) string {
+	title, _ := task["title"].(string)
+	description, _ := task["description"].(string)
+	agentType, _ := task["assigned_agent_type"].(string)
+	prdReqID, _ := task["prd_requirement_id"].(string)
+
+	if agentType == "" {
+		agentType = "backend"
+	}
+
+	var instructions string
+	switch agentType {
+	case "backend":
+		instructions = fmt.Sprintf(`You are a Backend Developer agent. Implement the following task:
+
+TASK: %s
+
+DESCRIPTION: %s
+
+PROJECT PATH: %s
+
+Requirements:
+- Write clean, maintainable code following best practices
+- Include appropriate error handling
+- Add comments for complex logic
+- Ensure the code compiles without errors
+- If creating new files, use appropriate naming conventions
+- Update any relevant configuration files if needed
+
+After completing the task, summarize what you did and any files you created or modified.`, title, description, projectPath)
+	case "frontend":
+		instructions = fmt.Sprintf(`You are a Frontend Developer agent. Implement the following task:
+
+TASK: %s
+
+DESCRIPTION: %s
+
+PROJECT PATH: %s
+
+Requirements:
+- Write clean, maintainable UI code following best practices
+- Use appropriate component structure
+- Ensure responsive design if applicable
+- Add appropriate styling
+- Ensure the code has no syntax errors
+- Follow the existing code style and patterns
+
+After completing the task, summarize what you did and any files you created or modified.`, title, description, projectPath)
+	case "security":
+		instructions = fmt.Sprintf(`You are a Security Engineer agent. Implement the following task:
+
+TASK: %s
+
+DESCRIPTION: %s
+
+PROJECT PATH: %s
+
+Requirements:
+- Follow OWASP security guidelines
+- Implement proper authentication and authorization
+- Use encryption where appropriate
+- Validate all inputs
+- Protect against common vulnerabilities (SQL injection, XSS, CSRF, etc.)
+- Document any security considerations
+
+After completing the task, summarize what you did and any files you created or modified.`, title, description, projectPath)
+	case "devops":
+		instructions = fmt.Sprintf(`You are a DevOps Engineer agent. Implement the following task:
+
+TASK: %s
+
+DESCRIPTION: %s
+
+PROJECT PATH: %s
+
+Requirements:
+- Use Docker and containerization best practices
+- Configure CI/CD pipelines appropriately
+- Ensure infrastructure as code principles
+- Monitor and log appropriately
+- Follow deployment best practices
+
+After completing the task, summarize what you did and any files you created or modified.`, title, description, projectPath)
+	case "qa":
+		instructions = fmt.Sprintf(`You are a QA Automation Engineer agent. Implement the following task:
+
+TASK: %s
+
+DESCRIPTION: %s
+
+PROJECT PATH: %s
+
+Requirements:
+- Write comprehensive unit tests
+- Write integration tests where appropriate
+- Follow test automation best practices
+- Ensure high code coverage for critical paths
+- Use appropriate testing frameworks
+
+After completing the task, summarize what you did and any files you created or modified.`, title, description, projectPath)
+	case "architect":
+		instructions = fmt.Sprintf(`You are a System Architect agent. Implement the following task:
+
+TASK: %s
+
+DESCRIPTION: %s
+
+PROJECT PATH: %s
+
+Requirements:
+- Follow clean architecture principles
+- Design for scalability and maintainability
+- Consider microservices boundaries if applicable
+- Document architectural decisions
+- Ensure proper data modeling
+
+After completing the task, summarize what you did and any files you created or modified.`, title, description, projectPath)
+	case "docs":
+		instructions = fmt.Sprintf(`You are a Technical Writer agent. Implement the following task:
+
+TASK: %s
+
+DESCRIPTION: %s
+
+PROJECT PATH: %s
+
+Requirements:
+- Write clear, comprehensive documentation
+- Use appropriate markdown formatting
+- Include code examples where relevant
+- Keep documentation up to date with code changes
+- Follow documentation best practices
+
+After completing the task, summarize what you did and any files you created or modified.`, title, description, projectPath)
+	default:
+		instructions = fmt.Sprintf(`You are a Developer agent. Implement the following task:
+
+TASK: %s
+
+DESCRIPTION: %s
+
+PROJECT PATH: %s
+
+Requirements:
+- Write clean, maintainable code
+- Follow best practices
+- Ensure the code works correctly
+
+After completing the task, summarize what you did.`, title, description, projectPath)
+	}
+
+	if prdReqID != "" {
+		instructions += fmt.Sprintf("\n\nPRD Requirement ID: %s", prdReqID)
+	}
+
+	return instructions
+}
+
 func (a *ProjectAnalyzer) scanModuleDependencies(module *ModuleInfo, analysis *ProjectAnalysis) {
 	moduleAbsPath := filepath.Join(a.projectPath, module.Path)
 

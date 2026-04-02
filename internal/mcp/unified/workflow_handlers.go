@@ -1356,11 +1356,23 @@ func (s *Server) handleWorkflowPlanDevelopV2(ctx context.Context, req *Request) 
 						"status":  "in_progress",
 						"notes":   "Assigned to " + agentIDToUse + " - execution_id: " + executionID + " - awaiting completion",
 					})
+
+					taskPhaseStr := ""
+					if taskPhase != nil {
+						if s, ok := taskPhase.(string); ok {
+							taskPhaseStr = s
+						}
+					}
+					executionPrompt := scanner.GenerateTaskExecutionPrompt(task, "", taskPhaseStr)
+					taskExecution["execution_prompt"] = executionPrompt
+					taskExecution["execution_instructions"] = fmt.Sprintf("Usa el prompt anterior con tu LLM para ejecutar la tarea. Cuando termines, llama task_complete(execution_id=%s, result='descripción del trabajo realizado')", executionID)
+
 					steps = append(steps, WorkflowStep{Name: "task_execute:" + taskTitle, Status: "in_progress", Output: map[string]interface{}{
 						"execution_id": executionID,
 						"task_id":      taskID,
 						"agent_id":     agentIDToUse,
-						"message":      "Tarea asignada. OpenCode debe ejecutar y llamar task_complete.",
+						"prompt":       executionPrompt,
+						"message":      "Tarea asignada. OpenCode debe ejecutar el prompt y llamar task_complete.",
 					}})
 				}
 			} else {
