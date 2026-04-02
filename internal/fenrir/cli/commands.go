@@ -14,9 +14,10 @@ import (
 	"github.com/andragon31/Ragnarok/internal/fenrir/mcp"
 	"github.com/andragon31/Ragnarok/internal/fenrir/memory"
 	"github.com/andragon31/Ragnarok/internal/fenrir/scanner"
+	"github.com/andragon31/Ragnarok/internal/version"
 )
 
-var Version = "1.2.0"
+var Version = version.Version
 
 func RunServe(port int, configPath, dataDir string) error {
 	if dataDir == "" {

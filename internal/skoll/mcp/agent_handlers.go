@@ -97,6 +97,22 @@ var AgentTypes = map[string]map[string]interface{}{
 	},
 }
 
+var DefaultToolsByType = map[string][]string{
+	"backend":  {"Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite", "MemSave", "MemFind", "MemContext", "PlanCreate", "PlanGet", "TaskCreate", "TaskUpdate", "TaskComplete", "PhaseUpdate", "CheckpointOpen", "HumanReviewCreate", "HumanReviewPending", "HumanReviewDecide", "SkillSearch", "SkillLoad", "RuleCheck", "NotificationSend", "ProjectScan", "SpecSave", "SpecCheck", "AgentList", "AgentGet", "AgentHeartbeat", "AgentCompleteTask", "TeamGet", "PlanProgress", "PlanDashboard", "PhaseReport", "PlanBlockers", "TaskSetBlocker"},
+	"frontend": {"Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite", "MemSave", "MemFind", "MemContext", "PlanCreate", "PlanGet", "TaskCreate", "TaskUpdate", "TaskComplete", "PhaseUpdate", "CheckpointOpen", "HumanReviewCreate", "HumanReviewPending", "HumanReviewDecide", "SkillSearch", "SkillLoad", "RuleCheck", "NotificationSend", "ProjectScan", "SpecSave", "SpecCheck", "AgentList", "AgentGet", "AgentHeartbeat", "AgentCompleteTask", "TeamGet", "PlanProgress", "PlanDashboard", "PhaseReport", "PlanBlockers", "TaskSetBlocker"},
+	"devops":   {"Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite", "MemSave", "MemFind", "MemContext", "PlanCreate", "PlanGet", "TaskCreate", "TaskUpdate", "TaskComplete", "PhaseUpdate", "CheckpointOpen", "HumanReviewCreate", "HumanReviewPending", "HumanReviewDecide", "SkillSearch", "SkillLoad", "RuleCheck", "NotificationSend", "ProjectScan", "SpecSave", "SpecCheck", "AgentList", "AgentGet", "AgentHeartbeat", "AgentCompleteTask", "TeamGet", "PlanProgress", "PlanDashboard", "PhaseReport", "PlanBlockers", "TaskSetBlocker", "SastRun", "QualitySnapshot", "PrecommitValidate", "PkgAudit"},
+	"qa":       {"Bash", "Read", "Glob", "Grep", "MemSave", "MemFind", "MemContext", "PlanCreate", "PlanGet", "TaskCreate", "TaskUpdate", "TaskComplete", "PhaseUpdate", "CheckpointOpen", "HumanReviewCreate", "HumanReviewPending", "HumanReviewDecide", "SkillSearch", "SkillLoad", "RuleCheck", "NotificationSend", "ProjectScan", "AgentList", "AgentGet", "AgentHeartbeat", "AgentCompleteTask", "TeamGet", "PlanProgress", "PlanDashboard", "PhaseReport", "PlanBlockers", "TaskSetBlocker", "QualitySnapshot", "PrecommitValidate", "PkgAudit", "PkgCheck"},
+	"security": {"Read", "Glob", "Grep", "MemSave", "MemFind", "MemContext", "PlanCreate", "PlanGet", "TaskCreate", "TaskUpdate", "TaskComplete", "PhaseUpdate", "CheckpointOpen", "HumanReviewCreate", "HumanReviewPending", "HumanReviewDecide", "SkillSearch", "SkillLoad", "RuleCheck", "NotificationSend", "ProjectScan", "SpecSave", "SpecCheck", "AgentList", "AgentGet", "AgentHeartbeat", "AgentCompleteTask", "TeamGet", "PlanProgress", "PlanDashboard", "PhaseReport", "PlanBlockers", "TaskSetBlocker", "SastRun", "PkgAudit", "PkgCheck"},
+	"docs":     {"Read", "Write", "Glob", "MemSave", "MemFind", "MemContext", "HumanReviewCreate", "HumanReviewPending", "SkillSearch", "SkillLoad", "RuleCheck", "NotificationSend", "ProjectScan", "SpecSave", "AgentList", "AgentGet", "TeamGet", "PlanProgress", "PlanDashboard", "PlanBlockers"},
+}
+
+func GetToolsForAgentType(agentType string) []string {
+	if tools, ok := DefaultToolsByType[agentType]; ok {
+		return tools
+	}
+	return DefaultToolsByType["backend"]
+}
+
 func (s *Server) handleAgentCreate(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
 		Name   string   `json:"name"`
@@ -126,8 +142,12 @@ func (s *Server) handleAgentCreate(ctx context.Context, req *Request) (*Response
 	}
 	capabilities := agentTemplate["capabilities"].([]string)
 
+	allowedTools := GetToolsForAgentType(params.Type)
+	_ = allowedTools // suppress unused warning
+
 	skillsJSON, _ := json.Marshal(skills)
 	capabilitiesJSON, _ := json.Marshal(capabilities)
+	allowedToolsJSON, _ := json.Marshal(allowedTools)
 
 	hasCapabilities := columnExists(s.db, "agents", "capabilities")
 
@@ -135,7 +155,7 @@ func (s *Server) handleAgentCreate(ctx context.Context, req *Request) (*Response
 	err := s.db.QueryRow(`SELECT id FROM agents WHERE name = ?`, params.Name).Scan(&existingID)
 	if err == nil {
 		return &Response{Result: map[string]interface{}{
-			"id":             existingID,
+			"agent_id":       existingID,
 			"name":           params.Name,
 			"agent_type":     params.Type,
 			"role":           role,
@@ -150,34 +170,45 @@ func (s *Server) handleAgentCreate(ctx context.Context, req *Request) (*Response
 
 	agentID := generateID("agent")
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
 	var query string
 	var args []interface{}
 
 	if hasCapabilities {
-		query = `INSERT INTO agents (id, name, role, scope, skills, allowed_tools, capabilities, status, created_at, updated_at)
-				  VALUES (?, ?, ?, ?, ?, '', ?, 'idle', ?, ?)`
-		args = []interface{}{agentID, params.Name, role, scope, string(skillsJSON), string(capabilitiesJSON), now, now}
+		query = `INSERT INTO agents (id, name, agent_type, role, scope, skills, allowed_tools, capabilities, status, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)`
+		args = []interface{}{agentID, params.Name, params.Type, role, scope, string(skillsJSON), string(allowedToolsJSON), string(capabilitiesJSON), "idle", now.Format(time.RFC3339), now.Format(time.RFC3339)}
 	} else {
-		query = `INSERT INTO agents (id, name, role, scope, skills, allowed_tools, status, created_at, updated_at)
-				  VALUES (?, ?, ?, ?, ?, '', 'idle', ?, ?)`
-		args = []interface{}{agentID, params.Name, role, scope, string(skillsJSON), now, now}
+		query = `INSERT INTO agents (id, name, agent_type, role, scope, skills, allowed_tools, status, created_at, updated_at)
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)`
+		args = []interface{}{agentID, params.Name, params.Type, role, scope, string(skillsJSON), string(allowedToolsJSON), "idle", now.Format(time.RFC3339), now.Format(time.RFC3339)}
 	}
 
-	_, err = s.db.Exec(query, args...)
+	_, err = tx.Exec(query, args...)
 	if err != nil {
+		tx.Rollback()
 		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
 
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	return &Response{Result: map[string]interface{}{
-		"id":           agentID,
-		"name":         params.Name,
-		"agent_type":   params.Type,
-		"role":         role,
-		"scope":        scope,
-		"skills":       skills,
-		"capabilities": capabilities,
-		"status":       "idle",
-		"created_at":   now,
+		"agent_id":      agentID,
+		"name":          params.Name,
+		"agent_type":    params.Type,
+		"role":          role,
+		"scope":         scope,
+		"skills":        skills,
+		"allowed_tools": allowedTools,
+		"capabilities":  capabilities,
+		"status":        "idle",
+		"created_at":    now,
 	}}, nil
 }
 
@@ -190,48 +221,67 @@ func (s *Server) handleAgentGet(ctx context.Context, req *Request) (*Response, e
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.AgentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+
 	agent := &SpecializedAgent{}
-	var skillsJSON, capabilitiesJSON sql.NullString
+	var skillsJSON, allowedToolsJSON, capabilitiesJSON, agentTypeNull sql.NullString
 	var currentTask sql.NullString
-	var lastHeartbeat sql.NullTime
+	var lastHeartbeatNull sql.NullString
+	var createdAtStr sql.NullString
 
 	hasCapabilities := columnExists(s.db, "agents", "capabilities")
 
 	if hasCapabilities {
-		query := `SELECT id, name, role, scope, skills, allowed_tools, capabilities, status, current_task, last_heartbeat, created_at
+		query := `SELECT id, name, agent_type, role, scope, skills, allowed_tools, capabilities, status, current_task, last_heartbeat, created_at
 				  FROM agents WHERE id = ?`
 		err := s.db.QueryRow(query, params.AgentID).Scan(
-			&agent.ID, &agent.Name, &agent.Role, &agent.Scope,
-			&skillsJSON, &agent.AllowedTools, &capabilitiesJSON,
-			&agent.Status, &currentTask, &lastHeartbeat, &agent.CreatedAt,
+			&agent.ID, &agent.Name, &agentTypeNull, &agent.Role, &agent.Scope,
+			&skillsJSON, &allowedToolsJSON, &capabilitiesJSON,
+			&agent.Status, &currentTask, &lastHeartbeatNull, &createdAtStr,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("agent not found: %w", err)
 		}
 	} else {
-		query := `SELECT id, name, role, scope, skills, allowed_tools, status, current_task, last_heartbeat, created_at
+		query := `SELECT id, name, agent_type, role, scope, skills, allowed_tools, status, current_task, last_heartbeat, created_at
 				  FROM agents WHERE id = ?`
 		err := s.db.QueryRow(query, params.AgentID).Scan(
-			&agent.ID, &agent.Name, &agent.Role, &agent.Scope,
-			&skillsJSON, &agent.AllowedTools,
-			&agent.Status, &currentTask, &lastHeartbeat, &agent.CreatedAt,
+			&agent.ID, &agent.Name, &agentTypeNull, &agent.Role, &agent.Scope,
+			&skillsJSON, &allowedToolsJSON,
+			&agent.Status, &currentTask, &lastHeartbeatNull, &createdAtStr,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("agent not found: %w", err)
+		}
+	}
+
+	if agentTypeNull.Valid {
+		agent.Type = agentTypeNull.String
+	}
+	if createdAtStr.Valid {
+		if t, err := time.Parse(time.RFC3339, createdAtStr.String); err == nil {
+			agent.CreatedAt = t
+		}
+	}
+	if lastHeartbeatNull.Valid {
+		if t, err := time.Parse(time.RFC3339, lastHeartbeatNull.String); err == nil {
+			agent.LastHeartbeat = t
 		}
 	}
 
 	if skillsJSON.Valid {
 		json.Unmarshal([]byte(skillsJSON.String), &agent.Skills)
 	}
+	if allowedToolsJSON.Valid {
+		json.Unmarshal([]byte(allowedToolsJSON.String), &agent.AllowedTools)
+	}
 	if capabilitiesJSON.Valid {
 		json.Unmarshal([]byte(capabilitiesJSON.String), &agent.Capabilities)
 	}
 	if currentTask.Valid {
 		agent.CurrentTask = currentTask.String
-	}
-	if lastHeartbeat.Valid {
-		agent.LastHeartbeat = lastHeartbeat.Time
 	}
 
 	return &Response{Result: agent}, nil
@@ -269,10 +319,15 @@ func (s *Server) handleSpecializedAgentList(ctx context.Context, req *Request) (
 	for rows.Next() {
 		var id, name, agentType, role, scope, status sql.NullString
 		var lastHeartbeat sql.NullTime
-		var createdAt time.Time
+		var createdAtStr sql.NullString
 
-		if err := rows.Scan(&id, &name, &agentType, &role, &scope, &status, &lastHeartbeat, &createdAt); err != nil {
+		if err := rows.Scan(&id, &name, &agentType, &role, &scope, &status, &lastHeartbeat, &createdAtStr); err != nil {
 			continue
+		}
+
+		var createdAt time.Time
+		if createdAtStr.Valid {
+			createdAt, _ = time.Parse(time.RFC3339, createdAtStr.String)
 		}
 
 		agent := map[string]interface{}{
@@ -307,6 +362,13 @@ func (s *Server) handleAgentAssignTask(ctx context.Context, req *Request) (*Resp
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.AgentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	if params.TaskID == "" {
+		return nil, fmt.Errorf("task_id is required")
 	}
 
 	now := time.Now()
@@ -349,6 +411,13 @@ func (s *Server) handleAgentCompleteTask(ctx context.Context, req *Request) (*Re
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.AgentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	if params.ExecutionID == "" {
+		return nil, fmt.Errorf("execution_id is required")
+	}
+
 	now := time.Now()
 	query := `UPDATE agents SET current_task = '', status = 'idle', last_heartbeat = ?, updated_at = ? WHERE id = ?`
 	if _, err := s.db.Exec(query, now, now, params.AgentID); err != nil {
@@ -381,6 +450,10 @@ func (s *Server) handleAgentHeartbeat(ctx context.Context, req *Request) (*Respo
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.AgentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+
 	now := time.Now()
 	query := `UPDATE agents SET last_heartbeat = ?, updated_at = ? WHERE id = ?`
 	_, err := s.db.Exec(query, now, now, params.AgentID)
@@ -401,6 +474,10 @@ func (s *Server) handleAgentSkillsGet(ctx context.Context, req *Request) (*Respo
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.AgentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
 	}
 
 	var skillsJSON string

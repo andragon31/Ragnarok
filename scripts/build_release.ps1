@@ -1,14 +1,56 @@
 # Build and Release Script for Ragnarok
-# Usage: .\scripts\build_release.ps1 [-SkipBuild] [-SkipUpload]
-
 param(
     [switch]$SkipBuild,
     [switch]$SkipUpload,
-    [string]$Version = "2.0.1"
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 $REPO_DIR = Split-Path -Parent $PSScriptRoot
+
+if ($Version -eq "") {
+    $versionFile = Join-Path $REPO_DIR "internal\version\version.go"
+    if (Test-Path $versionFile) {
+        $content = Get-Content $versionFile -Raw
+        if ($content -match 'Version\s*=\s*"([^"]+)"') {
+            $Version = $Matches[1]
+        }
+    }
+}
+
+if ($Version -eq "") { $Version = "3.1.0" } # Fallback
+
+# Sync Version to Installer (install.ps1)
+$installerFile = Join-Path $REPO_DIR "install.ps1"
+if (Test-Path $installerFile) {
+    Write-Host "`n[0/4] Syncing version to installer..." -ForegroundColor Gray
+    $installerContent = Get-Content $installerFile -Raw
+    # Update fallback version and usage comment
+    $installerContent = $installerContent -replace '(?<=File install\.ps1 -Version\s+)[0-9\.]+', $Version
+    $installerContent = $installerContent -replace '(?<=\$VERSION = ")[0-9\.]+', $Version
+    Set-Content $installerFile $installerContent -NoNewline
+    Write-Host "  Installer synchronized to v$Version." -ForegroundColor Gray
+}
+
+# Sync Version to Documentation & Verification
+$docs = @(
+    @{Path="README.md"; Pattern='(?<=Ragnarok Ecosystem v)[0-9\.]+'},
+    @{Path="README.md"; Pattern='(?<=### v)[0-9\.]+(?=\s+\(Latest\))'},
+    @{Path="AGENTS.md"; Pattern='(?<=v)[0-9\.]+(?=\s+\|)'},
+    @{Path="verify_install.ps1"; Pattern='(?<=Ragnarok v)[0-9\.]+'},
+    @{Path="verify_install.ps1"; Pattern='(?<=Ragnarok v)[0-9\.]+(?=\s+- Installation Verification Script)'}
+)
+
+foreach ($doc in $docs) {
+    $docPath = Join-Path $REPO_DIR $doc.Path
+    if (Test-Path $docPath) {
+        $content = Get-Content $docPath -Raw
+        $content = $content -replace $doc.Pattern, $Version
+        Set-Content $docPath $content -NoNewline
+        Write-Host "  $($doc.Path) synchronized to v$Version." -ForegroundColor Gray
+    }
+}
+
 $RELEASE_DIR = Join-Path $REPO_DIR "release"
 $BIN_DIR = Join-Path $RELEASE_DIR "bin"
 

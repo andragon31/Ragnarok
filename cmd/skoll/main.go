@@ -12,13 +12,14 @@ import (
 	"github.com/andragon31/Ragnarok/internal/skoll/config"
 	"github.com/andragon31/Ragnarok/internal/skoll/database"
 	"github.com/andragon31/Ragnarok/internal/skoll/mcp"
+	version "github.com/andragon31/Ragnarok/internal/version"
 )
 
-var version = "2.2.3"
+var v = version.Version
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Printf("Skoll v%s\n", version)
+		fmt.Printf("Skoll v%s\n", v)
 		fmt.Println("RSAW Orchestration Layer")
 		return
 	}
@@ -48,7 +49,7 @@ func main() {
 		}
 		runInit(*initProject, *configDir)
 	case "version":
-		fmt.Printf("Skoll v%s\n", version)
+		fmt.Printf("Skoll v%s\n", v)
 	default:
 		printUsage()
 		os.Exit(1)
@@ -56,22 +57,21 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`Skoll v1.0.0 - RSAW Orchestration Layer
-
-Usage:
-  skoll serve [--port PORT] [--dir DIR]
-  skoll init --project NAME [--dir DIR]
-  skoll version
-
-Commands:
-  serve    Start the MCP server
-  init     Initialize a new project
-  mcp      Run in MCP mode (stdio)
-  version  Show version
-
-Examples:
-  skoll serve --port 7438
-  skoll init --project "my-project"`)
+	fmt.Printf("Skoll v%s - RSAW Orchestration Layer\n\n", v)
+	fmt.Println("Usage:")
+	fmt.Println("  skoll serve [--port PORT] [--dir DIR]")
+	fmt.Println("  skoll init --project NAME [--dir DIR]")
+	fmt.Println("  skoll version")
+	fmt.Println("")
+	fmt.Println("Commands:")
+	fmt.Println("  serve    Start the MCP server")
+	fmt.Println("  init     Initialize a new project")
+	fmt.Println("  mcp      Run in MCP mode (stdio)")
+	fmt.Println("  version  Show version")
+	fmt.Println("")
+	fmt.Println("Examples:")
+	fmt.Println("  skoll serve --port 7438")
+	fmt.Println("  skoll init --project \"my-project\"")
 }
 
 func runServe(port int, dataDir string) {

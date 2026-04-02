@@ -46,6 +46,7 @@ type Observation struct {
 	ReadCount    int       `json:"read_count"`
 	IsCompressed bool      `json:"is_compressed"`
 	TokenCount   int       `json:"token_count"`
+	Metadata     string    `json:"metadata,omitempty"`
 }
 
 type Edge struct {
@@ -93,6 +94,13 @@ type Incident struct {
 	ResolvedAt  time.Time `json:"resolved_at,omitempty"`
 }
 
+type ProjectSummary struct {
+	TotalObservations int            `json:"total_observations"`
+	TypeDistribution  map[string]int `json:"type_distribution"`
+	RecentActivity    []*Observation `json:"recent_activity"`
+	ActiveSpecs       []*Spec        `json:"active_specs"`
+}
+
 type MemoryStore struct {
 	db *sql.DB
 }
@@ -115,19 +123,19 @@ func (s *MemoryStore) EndSession(sessionID string, endedAt time.Time) error {
 }
 
 func (s *MemoryStore) SaveObservation(obs *Observation) error {
-	query := `INSERT INTO observations (id, session_id, type, content, authority, module, file, line, tags, created_at, updated_at, token_count)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO observations (id, session_id, type, content, authority, module, file, line, tags, created_at, updated_at, token_count, metadata)
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	tagsJSON := fmt.Sprintf("[%s]", joinStrings(obs.Tags, ","))
 	var sessionID *string
 	if obs.SessionID != "" {
 		sessionID = &obs.SessionID
 	}
-	_, err := s.db.Exec(query, obs.ID, sessionID, obs.Type, obs.Content, obs.Authority, obs.Module, obs.File, obs.Line, tagsJSON, obs.CreatedAt, obs.UpdatedAt, obs.TokenCount)
+	_, err := s.db.Exec(query, obs.ID, sessionID, obs.Type, obs.Content, obs.Authority, obs.Module, obs.File, obs.Line, tagsJSON, obs.CreatedAt, obs.UpdatedAt, obs.TokenCount, obs.Metadata)
 	return err
 }
 
 func (s *MemoryStore) Search(query string, limit int) ([]*Observation, error) {
-	sqlQuery := `SELECT id, session_id, type, content, authority, module, file, line, tags, created_at, updated_at, token_count
+	sqlQuery := `SELECT id, session_id, type, content, authority, module, file, line, tags, created_at, updated_at, token_count, metadata
 				 FROM observations_fts WHERE observations_fts MATCH ? LIMIT ?`
 	rows, err := s.db.Query(sqlQuery, query, limit)
 	if err != nil {
@@ -162,7 +170,7 @@ func (s *MemoryStore) Search(query string, limit int) ([]*Observation, error) {
 }
 
 func (s *MemoryStore) GetObservationsByModule(module string, limit int) ([]*Observation, error) {
-	query := `SELECT id, session_id, type, content, authority, module, file, line, tags, created_at, updated_at, token_count
+	query := `SELECT id, session_id, type, content, authority, module, file, line, tags, created_at, updated_at, token_count, metadata
 			  FROM observations WHERE module = ? ORDER BY created_at DESC LIMIT ?`
 	rows, err := s.db.Query(query, module, limit)
 	if err != nil {
@@ -177,7 +185,8 @@ func (s *MemoryStore) GetObservationsByModule(module string, limit int) ([]*Obse
 		var sessionID, module, file, authority sql.NullString
 		var line sql.NullInt64
 		var tokenCount sql.NullInt64
-		err := rows.Scan(&obs.ID, &sessionID, &obs.Type, &obs.Content, &authority, &module, &file, &line, &tags, &obs.CreatedAt, &obs.UpdatedAt, &tokenCount)
+		var metadata sql.NullString
+		err := rows.Scan(&obs.ID, &sessionID, &obs.Type, &obs.Content, &authority, &module, &file, &line, &tags, &obs.CreatedAt, &obs.UpdatedAt, &tokenCount, &metadata)
 		if err != nil {
 			return nil, err
 		}
@@ -191,13 +200,14 @@ func (s *MemoryStore) GetObservationsByModule(module string, limit int) ([]*Obse
 		if tokenCount.Valid {
 			obs.TokenCount = int(tokenCount.Int64)
 		}
+		obs.Metadata = metadata.String
 		observations = append(observations, obs)
 	}
 	return observations, nil
 }
 
 func (s *MemoryStore) GetRecentObservations(limit int) ([]*Observation, error) {
-	query := `SELECT id, session_id, type, content, authority, module, file, line, tags, created_at, updated_at, token_count
+	query := `SELECT id, session_id, type, content, authority, module, file, line, tags, created_at, updated_at, token_count, metadata
 			  FROM observations ORDER BY created_at DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
@@ -212,7 +222,8 @@ func (s *MemoryStore) GetRecentObservations(limit int) ([]*Observation, error) {
 		var sessionID, module, file, authority sql.NullString
 		var line sql.NullInt64
 		var tokenCount sql.NullInt64
-		err := rows.Scan(&obs.ID, &sessionID, &obs.Type, &obs.Content, &authority, &module, &file, &line, &tags, &obs.CreatedAt, &obs.UpdatedAt, &tokenCount)
+		var metadata sql.NullString
+		err := rows.Scan(&obs.ID, &sessionID, &obs.Type, &obs.Content, &authority, &module, &file, &line, &tags, &obs.CreatedAt, &obs.UpdatedAt, &tokenCount, &metadata)
 		if err != nil {
 			return nil, err
 		}
@@ -226,6 +237,7 @@ func (s *MemoryStore) GetRecentObservations(limit int) ([]*Observation, error) {
 		if tokenCount.Valid {
 			obs.TokenCount = int(tokenCount.Int64)
 		}
+		obs.Metadata = metadata.String
 		observations = append(observations, obs)
 	}
 	return observations, nil
@@ -240,9 +252,7 @@ func (s *MemoryStore) GetStats() (*Stats, error) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&stats.TotalSessions); err != nil {
 		stats.TotalSessions = -1
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM edges`).Scan(&stats.TotalEdges); err != nil {
-		stats.TotalEdges = -1
-	}
+	// TotalEdges removed — schema cleanup pending
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM specs`).Scan(&stats.TotalSpecs); err != nil {
 		stats.TotalSpecs = -1
 	}
@@ -251,6 +261,55 @@ func (s *MemoryStore) GetStats() (*Stats, error) {
 	}
 
 	return stats, nil
+}
+
+func (s *MemoryStore) GetProjectSummary(days int) (*ProjectSummary, error) {
+	summary := &ProjectSummary{
+		TypeDistribution: make(map[string]int),
+		RecentActivity:   []*Observation{},
+		ActiveSpecs:      []*Spec{},
+	}
+
+	// 1. Total & Type distribution
+	queryDist := `SELECT type, COUNT(*) FROM observations 
+                  WHERE created_at >= datetime('now', '-' || ? || ' days') 
+                  GROUP BY type`
+	rowsDist, err := s.db.Query(queryDist, days)
+	if err == nil {
+		defer rowsDist.Close()
+		total := 0
+		for rowsDist.Next() {
+			var t string
+			var count int
+			if err := rowsDist.Scan(&t, &count); err == nil {
+				summary.TypeDistribution[t] = count
+				total += count
+			}
+		}
+		summary.TotalObservations = total
+	}
+
+	// 2. Recent Activity (latest 5)
+	recent, _ := s.GetRecentObservations(5)
+	if recent != nil {
+		summary.RecentActivity = recent
+	}
+
+	// 3. Active Specs
+	querySpecs := `SELECT id, module, title, status, created_at FROM specs 
+                   WHERE status = 'active' ORDER BY created_at DESC LIMIT 5`
+	rowsSpecs, err := s.db.Query(querySpecs)
+	if err == nil {
+		defer rowsSpecs.Close()
+		for rowsSpecs.Next() {
+			spec := &Spec{}
+			if err := rowsSpecs.Scan(&spec.ID, &spec.Module, &spec.Title, &spec.Status, &spec.CreatedAt); err == nil {
+				summary.ActiveSpecs = append(summary.ActiveSpecs, spec)
+			}
+		}
+	}
+
+	return summary, nil
 }
 
 type Stats struct {

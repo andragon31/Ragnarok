@@ -12,13 +12,14 @@ import (
 	"github.com/andragon31/Ragnarok/internal/hati/config"
 	"github.com/andragon31/Ragnarok/internal/hati/database"
 	"github.com/andragon31/Ragnarok/internal/hati/mcp"
+	version "github.com/andragon31/Ragnarok/internal/version"
 )
 
-var version = "2.2.3"
+var v = version.Version
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Printf("Hati v%s\n", version)
+		fmt.Printf("Hati v%s\n", v)
 		fmt.Println("Task Planning & Human-in-the-Loop Layer")
 		return
 	}
@@ -48,7 +49,7 @@ func main() {
 		}
 		runInit(*initProject, *configDir)
 	case "version":
-		fmt.Printf("Hati v%s\n", version)
+		fmt.Printf("Hati v%s\n", v)
 	default:
 		printUsage()
 		os.Exit(1)
@@ -56,22 +57,21 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`Hati v1.0.0 - Task Planning & Human-in-the-Loop Layer
-
-Usage:
-  hati serve [--port PORT] [--dir DIR]
-  hati init --project NAME [--dir DIR]
-  hati version
-
-Commands:
-  serve    Start the MCP server
-  init     Initialize a new project
-  mcp      Run in MCP mode (stdio)
-  version  Show version
-
-Examples:
-  hati serve --port 7439
-  hati init --project "my-project"`)
+	fmt.Printf("Hati v%s - Task Planning & Human-in-the-Loop Layer\n\n", v)
+	fmt.Println("Usage:")
+	fmt.Println("  hati serve [--port PORT] [--dir DIR]")
+	fmt.Println("  hati init --project NAME [--dir DIR]")
+	fmt.Println("  hati version")
+	fmt.Println("")
+	fmt.Println("Commands:")
+	fmt.Println("  serve    Start the MCP server")
+	fmt.Println("  init     Initialize a new project")
+	fmt.Println("  mcp      Run in MCP mode (stdio)")
+	fmt.Println("  version  Show version")
+	fmt.Println("")
+	fmt.Println("Examples:")
+	fmt.Println("  hati serve --port 7439")
+	fmt.Println("  hati init --project \"my-project\"")
 }
 
 func runServe(port int, dataDir string) {

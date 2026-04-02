@@ -54,6 +54,7 @@ func InitSchema(db *sql.DB) error {
 		updated_at DATETIME NOT NULL,
 		token_count INTEGER DEFAULT 0,
 		is_compressed INTEGER DEFAULT 0,
+		metadata TEXT,
 		FOREIGN KEY (session_id) REFERENCES sessions(id)
 	);
 
@@ -265,6 +266,9 @@ func InitSchema(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize schema: %w", err)
 	}
+
+	// Simple migration for existing DBs
+	db.Exec(`ALTER TABLE observations ADD COLUMN metadata TEXT`)
 
 	return nil
 }

@@ -1,6 +1,6 @@
 # Ragnarok — Agent Guidelines
 
-> v2.2.4 | Actualizar con cada cambio arquitectónico significativo
+> v3.1.0 | Actualizar con cada cambio arquitectónico significativo
 
 ## Propósito del Proyecto
 
@@ -113,10 +113,51 @@ Para inicializar un proyecto desde cero con un PRD, los agentes DEBEN utilizar e
 | Workflow | Descripción |
 |----------|-------------|
 | `workflow_project_lifecycle` | Inicialización completa (Recomendado para nuevos proyectos) |
+| `workflow_prd_analyze` | Análisis de PRD con creación de plan y agentes (Recomendado) |
 | `workflow_team_setup_from_prd` | Solo creación de agentes y equipo desde PRD |
 | `workflow_stack_based_init` | Creación de plan basado en stack (sin PRD) |
 | `workflow_plan_develop_v2` | Desarrollo multi-agente con delegation |
 | `workflow_checkpoint_create` | Validación de calidad con human review |
+
+## Reglas de Comunicación con el Usuario
+
+**CRÍTICO: Después de ejecutar CUALQUIER función o workflow, el agente DEBE mostrar al usuario:**
+
+### Después de `workflow_*`:
+- **plan_id**: Mostrar el ID y título del plan creado
+- **phases**: Número de fases creadas
+- **tasks**: Número total de tareas
+- **agents_created**: Nombres y roles de los agentes creados
+- **team_id**: ID del equipo creado
+- **stack_detected**: Stack y arquitectura detectada
+
+### Después de `plan_create` o `plan_create_from_prd`:
+- Mostrar: `plan_id`, `title`, `description`, `risk_level`, `phase_count`, `task_count`
+
+### Después de `task_create` o `phase_create`:
+- Mostrar: ID creado, título, y número de elementos creados
+
+### Después de `agent_create`:
+- Mostrar: `agent_id`, `name`, `role`, `agent_type`, `skills`
+
+### Después de `team_create`:
+- Mostrar: `team_id`, `name`, `member_count`, `agents`
+
+### Después de `human_review_create`:
+- Mostrar: `review_id`, `question`, `review_type`
+
+### Formato de presentación:
+```
+📋 **Resumen de [workflow/función]:**
+- **Plan ID**: xxx | **Título**: xxx
+- **Fases**: X | **Tareas**: X
+- **Agentes Creados**: X (backend-agent, qa-agent, etc.)
+- **Equipo**: xxx Team (ID: xxx)
+- **Stack**: Python/FastAPI con arquitectura monolítica
+- **Próximo paso**: Revisar y aprobar el plan para continuar
+```
+
+**NUNCA omitas esta información. El usuario necesita estos datos para tomar decisiones.**
 
 ## Testing
 

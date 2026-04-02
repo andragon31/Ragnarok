@@ -3,7 +3,6 @@ package unified
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 )
 
 // registerHelpHandlers registers all new Fase 3 meta-tools.
@@ -13,10 +12,7 @@ func (s *Server) registerHelpHandlers() {
 	}{
 		"ragnarok_help":        {fn: s.handleRagnarokHelp},
 		"ragnarok_status":      {fn: s.handleRagnarokStatus},
-		"plan_get_active":      {fn: s.handlePlanGetActive},
 		"session_context_full": {fn: s.handleSessionContextFull},
-		"quality_gate":         {fn: s.handleQualityGate},
-		"plan_dashboard":       {fn: s.handlePlanDashboard},
 	}
 	for name, t := range newTools {
 		s.handlers[name] = t.fn
@@ -40,112 +36,117 @@ func (s *Server) handleRagnarokHelp(ctx context.Context, req *Request) (*Respons
 	switch params.Topic {
 	case "getting_started":
 		return &Response{Result: map[string]interface{}{
-			"title": "Getting Started with Ragnarok",
+			"title": "Getting Started with Ragnarok Ecosystem",
+			"description": "Follow these steps to initialize a project and start development with AI agents.",
 			"steps": []string{
-				"1. ragnarok_status — verify all modules are healthy",
-				"2. project_scan(path) — detect stack and architecture",
-				"3. workflow_project_lifecycle(project_path) — auto-create full plan",
-				"4. human_review_pending() — check for approvals needed",
-				"5. task_get_next(plan_id) — get next task to work on",
-				"6. [do the work]",
-				"7. task_update(task_id, status=completed)",
-				"8. mem_save(title, type, what, why) — persist what you learned",
-				"9. Repeat from step 5 until {all_complete: true}",
-				"10. workflow_checkpoint_create(plan_id) — quality milestone",
+				"1. ragnarok_help(topic='project_init') — learn how to start from a PRD",
+				"2. ragnarok_status — verify all modules (Fenrir, Hati, Skoll, Tyr) are healthy",
+				"3. workflow_project_lifecycle(project_path, prd_file) — automated full initialization",
+				"4. plan_get_active — retrieve the plan created by the lifecycle workflow",
+				"5. human_review_pending — check if you need to approve the plan or agents",
+				"6. task_get_next(plan_id) — get the highest priority unblocked task",
+				"7. [Implement the feature/fix using your coding tools]",
+				"8. mem_save(title, type, what, why, learned) — persist key decisions to long-term memory",
+				"9. task_update(task_id, status='completed') — mark progress in Hati",
+				"10. workflow_checkpoint_create(plan_id) — trigger quality gate and milestone approval",
 			},
+			"pro_tip": "Run ragnarok_help(topic='workflows') to see advanced orchestration patterns.",
 		}}, nil
 	case "planning":
 		return &Response{Result: map[string]interface{}{
-			"title": "Planning Tools (Hati module)",
-			"tools": map[string]string{
-				"plan_create":          "Create a plan — returns plan_id. Required: title",
-				"plan_get":             "Get plan details — required: id",
-				"plan_list":            "List plans by status",
-				"plan_get_active":      "Get active plan (no id needed)",
-				"plan_dashboard":       "Full plan overview: phases + tasks + progress",
-				"phase_create":         "Add phase — required: plan_id, title",
-				"task_create":          "Add task — required: phase_id, title",
-				"task_get_next":        "Next pending task — required: plan_id",
-				"task_update":          "Update task status — required: task_id",
-				"task_assign_agents":   "Assign agents to task — required: task_id, agent_ids",
-				"human_review_pending": "List pending human approvals",
-				"human_review_decide":  "Approve/reject — required: review_id, decision",
+			"title": "Planning & Project Management (Hati Module)",
+			"description": "Hati manages the development lifecycle through plans, phases, and tasks.",
+			"core_tools": map[string]string{
+				"plan_create":          "Create a new plan root. Returns plan_id.",
+				"plan_get":             "Retrieve full plan structure, phases, and aggregated progress.",
+				"plan_list":            "List plans by status (active, completed, abandoned).",
+				"plan_get_active":      "Convenience: get the currently active plan for the workspace.",
+				"plan_dashboard":       "High-level overview of plan health, blockers, and velocity.",
+				"task_create":          "Add a task to a phase. Required: phase_id, title.",
+				"task_get_next":        "Retrieve the next unblocked task according to priority.",
+				"task_update":          "Update status (in_progress, completed, blocked).",
+				"human_review_pending": "Check for tasks/plans awaiting human decision.",
+				"human_review_decide":  "Submit approved/rejected decision for a review request.",
 			},
 		}}, nil
 	case "memory":
 		return &Response{Result: map[string]interface{}{
-			"title": "Memory Tools (Fenrir module)",
-			"tools": map[string]string{
-				"mem_save":              "Save observation — required: title, type",
-				"mem_find":              "Search memories — required: query",
-				"mem_context":           "Context for a module path",
-				"mem_session_start":     "Start session — required: goal",
-				"mem_session_end":       "End session with summary",
-				"session_context_full":  "Full context in one call",
-				"spec_save":             "Save a spec/constraint",
-				"spec_check":            "Verify spec compliance",
+			"title": "Memory & Context Layer (Fenrir Module)",
+			"description": "Fenrir provides long-term persistence for observations, decisions, and specs.",
+			"core_tools": map[string]string{
+				"mem_save":              "Save a development observation. Required: title, type, what, why.",
+				"mem_find":              "Search memory store using FTS5 full-text search.",
+				"mem_context":           "Get recent history for a specific module or file path.",
+				"mem_session_start":     "Initiate a work session with a goal for context grouping.",
+				"mem_session_end":       "Finalize session and distill learned context.",
+				"session_context_full":  "Retrieve plan + tasks + memory + agents in one call.",
+				"spec_save":             "Persist an architectural specification or coding constraint.",
+				"spec_check":            "Validate if code complies with registered specifications.",
+				"project_scan":          "Deep scan of project to detect stack, architecture, and modules.",
 			},
 		}}, nil
 	case "quality":
 		return &Response{Result: map[string]interface{}{
-			"title": "Quality Tools (Tyr module)",
-			"tools": map[string]string{
-				"quality_gate":       "Full quality check in one call — required: path",
-				"sast_run":           "SAST security scan",
-				"sast_findings":      "Get security findings",
-				"standard_run_all":   "Run all quality standards",
-				"precommit_validate": "Validate pre-commit hooks — required: path",
-				"pkg_check":          "Check package for CVEs — required: name",
+			"title": "Quality Assurance & Standards (Tyr Module)",
+			"description": "Tyr enforces coding standards, security, and dependency health.",
+			"core_tools": map[string]string{
+				"tyr_snapshot":       "Get a full quality snapshot: standards + SAST + metrics.",
+				"tyr_bootstrap":      "Import default quality rules and skills for a new project.",
+				"sast_run":           "Execute Static Analysis Security Testing scan.",
+				"sast_findings":      "Get vulnerability findings filtered by severity.",
+				"standard_run_all":   "Run all registered quality standards (lint, tests, etc.).",
+				"precommit_validate": "Check code against pre-commit hooks quality baseline.",
+				"pkg_check":          "Evaluate a package for CVEs and trust score.",
 			},
 		}}, nil
 	case "orchestration":
 		return &Response{Result: map[string]interface{}{
-			"title": "Orchestration Tools (Skoll module)",
-			"tools": map[string]string{
-				"agent_list":     "List all agents with status",
-				"agent_create":   "Create agent — required: name, role",
-				"task_execute":   "Execute task — required: task_id, agent_id",
-				"task_delegate":  "Delegate to agents — required: task_id, agent_ids",
-				"task_complete":  "Complete execution — required: execution_id",
-				"task_heartbeat": "Keep-alive — required: execution_id",
-				"skill_list":     "List available skills",
-				"team_create":    "Create team — required: name",
+			"title": "Agent Orchestration (Skoll Module)",
+			"description": "Skoll manages agent roles, teams, skills, and parallel execution.",
+			"core_tools": map[string]string{
+				"agent_list":     "List all registered agents and their current availability.",
+				"agent_create":   "Register a new agent role (e.g., backend-agent, qa-agent).",
+				"agent_activate": "Make an agent available for task assignment in a team.",
+				"task_execute":   "Start task execution by a specific agent role.",
+				"task_delegate":  "Distribute a task to multiple agents for parallel work.",
+				"task_status":    "Track execution progress and agent heartbeats.",
+				"team_create":    "Form a coordination team for a specific project path.",
+				"skill_list":     "List available automated skills (e.g., 'go-test', 'js-lint').",
 			},
 		}}, nil
 	case "workflows":
 		return &Response{Result: map[string]interface{}{
-			"title": "Recommended Workflows",
+			"title": "Automated Workflows & Lifecycles",
+			"description": "High-level orchestrations that combine multiple tools for complex goals.",
 			"recommended": []map[string]string{
-				{"name": "workflow_project_lifecycle", "desc": "Recommended full start: PRD Analysis -> Skoll Agents & Team -> Hati Planning -> Task Assignment -> Tyr Quality Baseline"},
-				{"name": "workflow_team_setup_from_prd", "desc": "PRD Analysis -> Skoll Agents -> Team Creation"},
-				{"name": "workflow_stack_based_init", "desc": "Stack-based plan initialization with Hati"},
-				{"name": "workflow_plan_develop_v2", "desc": "Multi-agent development loop with task delegation"},
-				{"name": "workflow_checkpoint_create", "desc": "Quality milestone with human review and validation"},
+				{"name": "workflow_project_lifecycle", "desc": "PRD Analysis -> Team Formation -> Planning -> Quality Baseline (Best for new projects)"},
+				{"name": "workflow_prd_analyze", "desc": "Scan stack and parse PRD requirements into a Hati plan"},
+				{"name": "workflow_plan_develop_v2", "desc": "Multi-agent loop: Get task -> Delegate -> Execute -> Verify"},
+				{"name": "workflow_checkpoint_create", "desc": "Quality gate: Run all tests -> SAST -> Human Review -> Plan Update"},
+				{"name": "workflow_session_start", "desc": "Load project context and memories for a new development session"},
 			},
 		}}, nil
 	case "project_init":
 		return &Response{Result: map[string]interface{}{
-			"title": "Project Initialization from PRD",
-			"description": "The best way to start a project is using the integrated lifecycle workflow.",
-			"command_example": "workflow_project_lifecycle(project_path='./path', prd_file='./PRD.md', title='Project Name')",
-			"what_it_does": []string{
-				"1. Analyzes tech stack and architecture (Fenrir)",
-				"2. Parses the PRD to extract requirements (Hati)",
-				"3. Creates specialized agents in Skoll (Backend, Frontend, etc.)",
-				"4. Forms a project team and assigns them (Skoll)",
-				"5. Generates a multi-phase development plan (Hati)",
-				"6. Auto-assigns agents to matching tasks",
-				"7. Runs a security baseline scan (Tyr)",
-				"8. Stores all context in persistent memory (Fenrir)",
+			"title": "Project Initialization Guide",
+			"description": "Use the integrated lifecycle to set up a project from a PRD file.",
+			"command": "workflow_project_lifecycle(project_path='./', prd_file='./PRD.md', title='My App')",
+			"actions": []string{
+				"1. Fenrir scans your tech stack (Go, React, Python, etc.)",
+				"2. Hati extracts functional/non-functional requirements from the PRD",
+				"3. Skoll creates a balanced team of specialized AI agents",
+				"4. Hati generates an execution plan with phases and estimated tasks",
+				"5. Tyr runs a security baseline scan on existing code",
 			},
-			"next_steps": "After initialization, wait for 'human_review_pending' to approve the plan, then start 'task_get_next'.",
+			"benefit": "This gives you full context, a team, and a roadmap in one single call.",
 		}}, nil
 	default:
 		return &Response{Result: map[string]interface{}{
-			"title":       "Ragnarok MCP Ecosystem v2.2.4",
-			"description": "Orchestrates AI agents for software development. Modules: Fenrir (memory), Hati (planning), Skoll (orchestration), Tyr (quality).",
-			"quick_start": "Call ragnarok_help(topic='getting_started') or topic='project_init' for PRD-driven setup.",
-			"topics":      []string{"getting_started", "project_init", "planning", "memory", "quality", "orchestration", "workflows"},
+			"id":          "ragnarok-v3",
+			"title":       "Ragnarok MCP Ecosystem v2.4.11",
+			"description": "The ultimate orchestration layer for autonomous AI software development.",
+			"modules":     "Memory (Fenrir), Planning (Hati), Orchestration (Skoll), and Quality (Tyr).",
+			"quick_start": "Call ragnarok_help(topic='getting_started') to begin.",
 		}}, nil
 	}
 }
@@ -161,7 +162,7 @@ func (s *Server) handleRagnarokStatus(ctx context.Context, req *Request) (*Respo
 		"mem_stats":    "fenrir",
 		"hati_stats":   "hati",
 		"skoll_status": "skoll",
-		"tyr_stats":    "tyr",
+		"tyr_status":    "tyr",
 	} {
 		if stats, err := s.callTool(ctx, toolName, map[string]interface{}{}); err == nil {
 			if m, ok := modules[modName].(map[string]interface{}); ok {
@@ -171,19 +172,11 @@ func (s *Server) handleRagnarokStatus(ctx context.Context, req *Request) (*Respo
 	}
 
 	return &Response{Result: map[string]interface{}{
-		"version": "2.2.4",
+		"version": "2.4.11",
+		"status":  "healthy",
 		"modules": modules,
 		"tools":   len(s.tools),
 	}}, nil
-}
-
-// handlePlanGetActive returns the active plan without requiring a plan_id.
-func (s *Server) handlePlanGetActive(ctx context.Context, req *Request) (*Response, error) {
-	result, err := s.callTool(ctx, "plan_list", map[string]interface{}{"status": "active"})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active plans: %w", err)
-	}
-	return &Response{Result: result}, nil
 }
 
 // handleSessionContextFull returns comprehensive session context in one call.
@@ -224,72 +217,4 @@ func (s *Server) handleSessionContextFull(ctx context.Context, req *Request) (*R
 	}
 
 	return &Response{Result: result}, nil
-}
-
-// handleQualityGate runs a full quality check in one call.
-func (s *Server) handleQualityGate(ctx context.Context, req *Request) (*Response, error) {
-	var params struct {
-		Path   string `json:"path"`
-		PlanID string `json:"plan_id,omitempty"`
-	}
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
-	}
-	if params.Path == "" {
-		return nil, fmt.Errorf("path is required")
-	}
-
-	results := map[string]interface{}{"path": params.Path, "passed": true}
-	var failures []string
-
-	if sast, err := s.callTool(ctx, "sast_run", map[string]interface{}{"path": params.Path}); err == nil {
-		results["sast"] = sast
-	}
-	if standards, err := s.callTool(ctx, "standard_run_all", map[string]interface{}{}); err == nil {
-		results["standards"] = standards
-	} else {
-		failures = append(failures, "standards: "+err.Error())
-	}
-	if precommit, err := s.callTool(ctx, "precommit_validate", map[string]interface{}{"path": params.Path}); err == nil {
-		results["precommit"] = precommit
-	} else {
-		failures = append(failures, "precommit: "+err.Error())
-	}
-	if findings, err := s.callTool(ctx, "sast_findings", map[string]interface{}{"severity": "critical"}); err == nil {
-		results["critical_findings"] = findings
-	}
-
-	if len(failures) > 0 {
-		results["passed"] = false
-		results["failures"] = failures
-	}
-	return &Response{Result: results}, nil
-}
-
-// handlePlanDashboard returns a full plan dashboard.
-func (s *Server) handlePlanDashboard(ctx context.Context, req *Request) (*Response, error) {
-	var params struct {
-		PlanID string `json:"plan_id"`
-	}
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
-	}
-	if params.PlanID == "" {
-		return nil, fmt.Errorf("plan_id is required")
-	}
-
-	dashboard := map[string]interface{}{"plan_id": params.PlanID}
-	if plan, err := s.callTool(ctx, "plan_get", map[string]interface{}{"id": params.PlanID}); err == nil {
-		dashboard["plan"] = plan
-	}
-	if progress, err := s.callTool(ctx, "plan_progress", map[string]interface{}{"plan_id": params.PlanID}); err == nil {
-		dashboard["progress"] = progress
-	}
-	if tasks, err := s.callTool(ctx, "task_list", map[string]interface{}{"plan_id": params.PlanID}); err == nil {
-		dashboard["tasks"] = tasks
-	}
-	if blockers, err := s.callTool(ctx, "plan_blockers", map[string]interface{}{"id": params.PlanID}); err == nil {
-		dashboard["blockers"] = blockers
-	}
-	return &Response{Result: dashboard}, nil
 }

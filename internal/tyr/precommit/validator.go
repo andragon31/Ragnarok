@@ -1,6 +1,9 @@
 package precommit
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -131,6 +134,7 @@ func (v *PreCommitValidator) Validate(files []*FileChange) *ValidationResponse {
 func (v *PreCommitValidator) checkFile(file *FileChange) []*ValidationError {
 	var allErrors []*ValidationError
 
+	// Internal checks (fast)
 	syntaxErrors := v.syntaxChecker.Check(file)
 	allErrors = append(allErrors, syntaxErrors...)
 
@@ -145,7 +149,49 @@ func (v *PreCommitValidator) checkFile(file *FileChange) []*ValidationError {
 		})
 	}
 
+	// External tool checks (deep)
+	if file.Language == "go" {
+		toolErrors := v.checkGoWithTools(file)
+		allErrors = append(allErrors, toolErrors...)
+	}
+
 	return allErrors
+}
+
+func (v *PreCommitValidator) checkGoWithTools(file *FileChange) []*ValidationError {
+	var errors []*ValidationError
+
+	// Use a temporary file for external tools
+	tmpFile := fmt.Sprintf("%s/tyr_check_%d.go", os.TempDir(), time.Now().UnixNano())
+	if err := os.WriteFile(tmpFile, []byte(file.Content), 0644); err != nil {
+		return nil
+	}
+	defer os.Remove(tmpFile)
+
+	// 1. gofmt check
+	fmtCmd := exec.Command("gofmt", "-l", tmpFile)
+	fmtOutput, err := fmtCmd.Output()
+	if err == nil && len(fmtOutput) > 0 {
+		errors = append(errors, &ValidationError{
+			Type:       "format",
+			Message:    "file is not gofmt compliant",
+			CanAutoFix: true,
+		})
+	}
+
+	// 2. go vet (basic check on single file)
+	vetCmd := exec.Command("go", "vet", tmpFile)
+	vetOutput, _ := vetCmd.CombinedOutput()
+	if len(vetOutput) > 0 {
+		// Parse vet output if possible, or just report as a general error
+		errors = append(errors, &ValidationError{
+			Type:       "logic",
+			Message:    "go vet findings: " + strings.TrimSpace(string(vetOutput)),
+			CanAutoFix: false,
+		})
+	}
+
+	return errors
 }
 
 func (v *PreCommitValidator) checkWarnings(file *FileChange) []*ValidationWarning {
@@ -164,6 +210,19 @@ func (v *PreCommitValidator) TryAutoFix(file *FileChange, err *ValidationError) 
 
 	switch err.Type {
 	case "format":
+		if file.Language == "go" {
+			// Real gofmt fix
+			cmd := exec.Command("gofmt", "-w", file.Path)
+			if strings.Contains(file.Path, "tyr_check_") {
+				// We are in a temp file during validation
+			} else {
+				cmd.Run()
+				// After run, we should probably reload content if we want to return it
+				if content, err := os.ReadFile(file.Path); err == nil {
+					file.Content = string(content)
+				}
+			}
+		}
 		err.Fixed = true
 	case "missing":
 		if strings.Contains(err.Message, "imported but not used") {

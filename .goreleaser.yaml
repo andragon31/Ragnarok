@@ -1,3 +1,4 @@
+# .goreleaser.yaml
 version: 2
 
 project_name: ragnarok
@@ -5,52 +6,92 @@ project_name: ragnarok
 before:
   hooks:
     - go mod tidy
+    - go mod download
 
 builds:
-  - id: rag
-    main: ./cmd/rag
-    binary: rag
-    ldflags:
-      - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-      - -X main.buildDate={{.Date}}
+  - id: fenrir
+    main: ./cmd/fenrir/main.go
+    binary: fenrir
     env:
       - CGO_ENABLED=0
     goos:
       - linux
-      - darwin
       - windows
+      - darwin
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
+
+  - id: hati
+    main: ./cmd/hati/main.go
+    binary: hati
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+  - id: skoll
+    main: ./cmd/skoll/main.go
+    binary: skoll
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tyr
+    main: ./cmd/tyr/main.go
+    binary: tyr
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+  - id: rag
+    main: ./cmd/rag/main.go
+    binary: rag
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
 
 archives:
-  - id: rag
-    builds:
-      - rag
-    name_template: "ragnarok_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - format: tar.gz
+    # use zip for windows archives
     format_overrides:
       - goos: windows
         format: zip
-    files:
-      - README.md
-      - LICENSE
-      - AGENTS.md
-      - CHANGELOG.md
-      - install.ps1
-      - install.sh
-      - install_quick.ps1
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 
 checksum:
-  name_template: "checksums.txt"
-  algorithm: sha256
+  name_template: 'checksums.txt'
 
-release:
-  github:
-    owner: andragon31
-    name: Ragnarok
-  name_template: "Ragnarok v{{ .Version }}"
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'

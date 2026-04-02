@@ -18,6 +18,10 @@ import (
 	"github.com/andragon31/Ragnarok/internal/tyr/security"
 )
 
+const (
+	errFailedParseParams = "failed to parse params: %w"
+)
+
 func (s *Server) handlePkgCheck(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
 		Name       string `json:"name"`
@@ -29,7 +33,7 @@ func (s *Server) handlePkgCheck(ctx context.Context, req *Request) (*Response, e
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Ecosystem == "" {
@@ -149,7 +153,7 @@ func (s *Server) handlePkgLicense(ctx context.Context, req *Request) (*Response,
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	client := registry.NewRegistryClient()
@@ -186,7 +190,7 @@ func (s *Server) handlePkgAudit(ctx context.Context, req *Request) (*Response, e
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.ProjectPath == "" {
@@ -223,7 +227,7 @@ func (s *Server) handlePkgAuditSnapshot(ctx context.Context, req *Request) (*Res
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	return &Response{
@@ -244,7 +248,7 @@ func (s *Server) handlePkgAuditContinuous(ctx context.Context, req *Request) (*R
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	result := &ContinuousAuditResult{
@@ -389,7 +393,7 @@ func (s *Server) handleSastRun(ctx context.Context, req *Request) (*Response, er
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Target == "" {
@@ -442,7 +446,7 @@ func (s *Server) handleSastFindings(ctx context.Context, req *Request) (*Respons
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Limit == 0 {
@@ -488,7 +492,7 @@ func (s *Server) handleSastResolve(ctx context.Context, req *Request) (*Response
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	query := `UPDATE sast_findings SET status = 'resolved' WHERE id = ?`
@@ -517,7 +521,7 @@ func (s *Server) handleAuditLog(ctx context.Context, req *Request) (*Response, e
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.RiskLevel == "" {
@@ -558,7 +562,7 @@ func (s *Server) handleSessionAudit(ctx context.Context, req *Request) (*Respons
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Limit == 0 {
@@ -604,7 +608,7 @@ func (s *Server) handleInjectGuard(ctx context.Context, req *Request) (*Response
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	result := security.ScanContent(params.Content)
@@ -635,7 +639,7 @@ func (s *Server) handleProactiveScan(ctx context.Context, req *Request) (*Respon
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.ModulePath == "" {
@@ -697,7 +701,7 @@ func (s *Server) handleSanitize(ctx context.Context, req *Request) (*Response, e
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	result := security.Sanitize(params.Content)
@@ -720,7 +724,7 @@ func (s *Server) handleStandardRun(ctx context.Context, req *Request) (*Response
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	return &Response{
@@ -739,7 +743,7 @@ func (s *Server) handleStandardRunAll(ctx context.Context, req *Request) (*Respo
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.CheckpointType == "" {
@@ -898,23 +902,53 @@ func (s *Server) handleStandardList(ctx context.Context, req *Request) (*Respons
 	}, nil
 }
 
-func (s *Server) handleQualitySnapshot(ctx context.Context, req *Request) (*Response, error) {
+func (s *Server) handleTyrSnapshot(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
+		ProjectPath    string `json:"project_path,omitempty"`
 		CheckpointType string `json:"checkpoint_type,omitempty"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
+	}
+
+	// 1. Get latest findings summary
+	var activeFindings int
+	var criticalCount int
+	s.db.QueryRow(`SELECT COUNT(*) FROM sast_findings WHERE status = 'active'`).Scan(&activeFindings)
+	s.db.QueryRow(`SELECT COUNT(*) FROM sast_findings WHERE status = 'active' AND severity = 'critical'`).Scan(&criticalCount)
+
+	// 2. Get quality score (latest run)
+	var qualityScore float64
+	s.db.QueryRow(`SELECT AVG(metric_value) FROM standards_results WHERE checkpoint = ? OR ? = ''`, params.CheckpointType, params.CheckpointType).Scan(&qualityScore)
+
+	// 3. Get latest standard results
+	rows, _ := s.db.Query(`SELECT standard_id, passed, metric_value FROM standards_results ORDER BY ran_at DESC LIMIT 10`)
+	var standards []map[string]interface{}
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			var passed bool
+			var val float64
+			if err := rows.Scan(&id, &passed, &val); err == nil {
+				standards = append(standards, map[string]interface{}{"id": id, "passed": passed, "score": val})
+			}
+		}
 	}
 
 	return &Response{
 		Result: map[string]interface{}{
 			"snapshot_time":   time.Now(),
+			"project_path":    params.ProjectPath,
 			"checkpoint_type": params.CheckpointType,
-			"quality_score":   0.0,
-			"standards":       []interface{}{},
-			"findings":        []interface{}{},
-			"note":            "quality_snapshot provides latest snapshot for Hati",
+			"quality_score":   qualityScore,
+			"findings": map[string]interface{}{
+				"total_active": activeFindings,
+				"critical":     criticalCount,
+			},
+			"standards": standards,
+			"note":      "tyr_snapshot provides quality health metrics for decision making",
 		},
 	}, nil
 }
@@ -926,7 +960,7 @@ func (s *Server) handleScopeViolations(ctx context.Context, req *Request) (*Resp
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Limit == 0 {
@@ -1004,7 +1038,7 @@ func (s *Server) handlePrecommitValidate(ctx context.Context, req *Request) (*Re
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	var files []*precommit.FileChange
@@ -1048,7 +1082,7 @@ func (s *Server) handlePrecommitAutofix(ctx context.Context, req *Request) (*Res
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	var results []map[string]string
@@ -1069,13 +1103,13 @@ func (s *Server) handlePrecommitAutofix(ctx context.Context, req *Request) (*Res
 	}, nil
 }
 
-func (s *Server) handleBootstrapImport(ctx context.Context, req *Request) (*Response, error) {
+func (s *Server) handleTyrBootstrap(ctx context.Context, req *Request) (*Response, error) {
 	var params struct {
 		ProjectPath string `json:"project_path"`
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.ProjectPath == "" {
@@ -1085,38 +1119,186 @@ func (s *Server) handleBootstrapImport(ctx context.Context, req *Request) (*Resp
 	ragnarokDir := params.ProjectPath + "/.ragnarok"
 	standardsFile := ragnarokDir + "/standards.json"
 
-	standardsCount := 0
+	var standardsToImport []map[string]string
 
-	if data, err := os.ReadFile(standardsFile); err == nil {
-		var standards []map[string]string
-		if err := json.Unmarshal(data, &standards); err == nil {
-			for _, std := range standards {
-				name := std["name"]
-				description := std["description"]
-				stdType := std["type"]
-				if stdType == "" {
-					stdType = "quality"
-				}
-
-				id := fmt.Sprintf("std_%d", time.Now().UnixNano())
-				now := time.Now()
-				_, err := s.db.Exec(`
-					INSERT OR REPLACE INTO standards 
-					(id, name, description, category, created_at)
-					VALUES (?, ?, ?, ?, ?)
-				`, id, name, description, stdType, now)
-				if err == nil {
-					standardsCount++
-				}
-			}
+	data, err := os.ReadFile(standardsFile)
+	if err == nil {
+		json.Unmarshal(data, &standardsToImport)
+	} else {
+		// Default standards if file is missing
+		standardsToImport = []map[string]string{
+			{"name": "Security: No Hardcoded Secrets", "description": "Scan for potential API keys and secrets in code", "type": "security"},
+			{"name": "Quality: Minimal Complexity", "description": "Ensure methods stay below cognitive complexity limits", "type": "quality"},
+			{"name": "Security: Dependency Audit", "description": "Check all packages for known CVEs", "type": "security"},
 		}
+	}
+
+	standardsCount := 0
+	for _, std := range standardsToImport {
+		name := std["name"]
+		description := std["description"]
+		stdType := std["type"]
+		if stdType == "" {
+			stdType = "quality"
+		}
+
+		id := fmt.Sprintf("std_%d", time.Now().UnixNano())
+		now := time.Now()
+		_, err := s.db.Exec(`
+			INSERT OR REPLACE INTO standards 
+			(id, name, description, category, created_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, id, name, description, stdType, now)
+		if err == nil {
+			standardsCount++
+		}
+		time.Sleep(1 * time.Millisecond) // Ensure unique IDs
 	}
 
 	return &Response{
 		Result: map[string]interface{}{
 			"project_path":       params.ProjectPath,
 			"standards_imported": standardsCount,
-			"source":             "fenrir-bootstrap",
+			"source":             "tyr-bootstrap",
+		},
+	}, nil
+}
+func (s *Server) handleQualityGate(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		Path   string `json:"path"`
+		PlanID string `json:"plan_id,omitempty"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+	if params.Path == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+
+	results := map[string]interface{}{"path": params.Path, "passed": true}
+	var failures []string
+
+	// Helper to call internal handlers safely
+	callInternal := func(method string, p map[string]interface{}) (interface{}, error) {
+		pJSON, _ := json.Marshal(p)
+		handler, ok := s.handlers[method]
+		if !ok {
+			return nil, fmt.Errorf("method not found: %s", method)
+		}
+		r, err := handler(ctx, &Request{Params: pJSON})
+		if err != nil {
+			return nil, err
+		}
+		return r.Result, nil
+	}
+
+	if sast, err := callInternal("sast_run", map[string]interface{}{"path": params.Path}); err == nil {
+		results["sast"] = sast
+	}
+	if standards, err := callInternal("standard_run_all", map[string]interface{}{}); err == nil {
+		results["standards"] = standards
+	} else {
+		failures = append(failures, "standards: "+err.Error())
+	}
+	if precommit, err := callInternal("precommit_validate", map[string]interface{}{"path": params.Path}); err == nil {
+		results["precommit"] = precommit
+	} else {
+		failures = append(failures, "precommit: "+err.Error())
+	}
+	if findings, err := callInternal("sast_findings", map[string]interface{}{"severity": "critical"}); err == nil {
+		results["critical_findings"] = findings
+	}
+
+	if len(failures) > 0 {
+		results["passed"] = false
+		results["failures"] = failures
+	}
+	return &Response{Result: results}, nil
+}
+
+func (s *Server) handleStandardCreate(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Category    string `json:"category"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf(errFailedParseParams, err)
+	}
+
+	id := generateID("std")
+	now := time.Now()
+
+	_, err := s.db.Exec(`
+		INSERT INTO standards (id, name, description, category, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, id, params.Name, params.Description, params.Category, now)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create standard: %w", err)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"id":       id,
+			"name":     params.Name,
+			"category": params.Category,
+			"status":   "created",
+		},
+	}, nil
+}
+
+func (s *Server) handleStandardUpdate(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		ID          string `json:"id"`
+		Name        string `json:"name,omitempty"`
+		Description string `json:"description,omitempty"`
+		Category    string `json:"category,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf(errFailedParseParams, err)
+	}
+
+	if params.ID == "" {
+		return nil, fmt.Errorf("id is required")
+	}
+
+	// Dynamic update build
+	query := "UPDATE standards SET "
+	var args []interface{}
+	var updates []string
+
+	if params.Name != "" {
+		updates = append(updates, "name = ?")
+		args = append(args, params.Name)
+	}
+	if params.Description != "" {
+		updates = append(updates, "description = ?")
+		args = append(args, params.Description)
+	}
+	if params.Category != "" {
+		updates = append(updates, "category = ?")
+		args = append(args, params.Category)
+	}
+
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no fields to update")
+	}
+
+	query += strings.Join(updates, ", ") + " WHERE id = ?"
+	args = append(args, params.ID)
+
+	_, err := s.db.Exec(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update standard: %w", err)
+	}
+
+	return &Response{
+		Result: map[string]interface{}{
+			"id":     params.ID,
+			"status": "updated",
 		},
 	}, nil
 }

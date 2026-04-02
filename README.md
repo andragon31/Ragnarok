@@ -1,4 +1,4 @@
-# Ragnarok Ecosystem v2.2.4
+# Ragnarok Ecosystem v3.1.0
 
 **AI Governance & Autonomous Development Ecosystem**
 
@@ -362,7 +362,7 @@ rag serve
 
 ## Changelog
 
-### v2.2.4 (Latest)
+### v3.1.0 (Latest)
 - CI/CD pipeline con GitHub Actions (`ci.yml`, `release.yml`)
 - Release automation con GoReleaser (cross-platform binaries)
 - Instalador Linux/macOS (`install.sh`)

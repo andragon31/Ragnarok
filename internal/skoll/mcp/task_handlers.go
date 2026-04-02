@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+const (
+	errFailedParseParams   = "failed to parse params: %w"
+	errExecutionIDRequired = "execution_id is required"
+	errTaskIDRequired      = "task_id is required"
+)
+
 type TaskExecution struct {
 	ID          string     `json:"id"`
 	TaskID      string     `json:"task_id"`
@@ -33,11 +39,11 @@ func (s *Server) handleTaskExecute(ctx context.Context, req *Request) (*Response
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.TaskID == "" {
-		return nil, fmt.Errorf("task_id is required")
+		return nil, fmt.Errorf(errTaskIDRequired)
 	}
 	if params.AgentID == "" {
 		return nil, fmt.Errorf("agent_id is required")
@@ -75,14 +81,20 @@ func (s *Server) handleTaskDelegate(ctx context.Context, req *Request) (*Respons
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.TaskID == "" {
-		return nil, fmt.Errorf("task_id is required")
+		return nil, fmt.Errorf(errTaskIDRequired)
 	}
+	
+	// Si no hay agent_ids, intentamos buscar por rol
 	if len(params.AgentIDs) == 0 {
-		return nil, fmt.Errorf("agent_ids are required")
+		params.AgentIDs = s.findAgentsByRole(params.PhaseID)
+	}
+
+	if len(params.AgentIDs) == 0 {
+		return nil, fmt.Errorf("no active agents found for delegation")
 	}
 
 	now := time.Now()
@@ -119,7 +131,7 @@ func (s *Server) handleTaskStatus(ctx context.Context, req *Request) (*Response,
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.ExecutionID == "" && params.TaskID == "" && params.AgentID == "" {
@@ -200,11 +212,11 @@ func (s *Server) handleTaskHeartbeat(ctx context.Context, req *Request) (*Respon
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.ExecutionID == "" {
-		return nil, fmt.Errorf("execution_id is required")
+		return nil, fmt.Errorf(errExecutionIDRequired)
 	}
 
 	now := time.Now()
@@ -229,11 +241,11 @@ func (s *Server) handleTaskComplete(ctx context.Context, req *Request) (*Respons
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.ExecutionID == "" {
-		return nil, fmt.Errorf("execution_id is required")
+		return nil, fmt.Errorf(errExecutionIDRequired)
 	}
 	if params.Status == "" {
 		params.Status = "completed"
@@ -282,7 +294,7 @@ func (s *Server) handleTaskCancel(ctx context.Context, req *Request) (*Response,
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.ExecutionID == "" {
@@ -302,6 +314,29 @@ func (s *Server) handleTaskCancel(ctx context.Context, req *Request) (*Response,
 		"reason":       params.Reason,
 		"cancelled_at": now,
 	}}, nil
+}
+
+func (s *Server) findAgentsByRole(role string) []string {
+	var agents []string
+	query := `SELECT id FROM agents WHERE is_active = 1`
+	var args []interface{}
+	if role != "" {
+		query += " AND (role = ? OR agent_type = ? OR role LIKE ?)"
+		args = append(args, role, role, "%"+role+"%")
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return agents
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var aid string
+		if err := rows.Scan(&aid); err == nil {
+			agents = append(agents, aid)
+		}
+	}
+	return agents
 }
 
 func (s *Server) handleWorkflowDeprecate(ctx context.Context, req *Request) (*Response, error) {

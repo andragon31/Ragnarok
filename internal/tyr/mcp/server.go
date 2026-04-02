@@ -101,12 +101,15 @@ func (s *Server) registerHandlers() {
 
 	s.handlers["standard_run"] = s.handleStandardRun
 	s.handlers["standard_run_all"] = s.handleStandardRunAll
+	s.handlers["quality_gate"] = s.handleQualityGate
 	s.handlers["standard_list"] = s.handleStandardList
-	s.handlers["quality_snapshot"] = s.handleQualitySnapshot
+	s.handlers["standard_create"] = s.handleStandardCreate
+	s.handlers["standard_update"] = s.handleStandardUpdate
+	s.handlers["tyr_snapshot"] = s.handleTyrSnapshot
 
 	s.handlers["precommit_validate"] = s.handlePrecommitValidate
 	s.handlers["precommit_autofix"] = s.handlePrecommitAutofix
-	s.handlers["bootstrap_import"] = s.handleBootstrapImport
+	s.handlers["tyr_bootstrap"] = s.handleTyrBootstrap
 }
 
 func (s *Server) HandleRequest(ctx context.Context, raw []byte) ([]byte, error) {

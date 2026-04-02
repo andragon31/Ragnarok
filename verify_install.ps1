@@ -1,4 +1,4 @@
-# Ragnarok v2.2.4 - Installation Verification Script
+# Ragnarok v3.1.0 - Installation Verification Script
 # Tests the unified binary architecture (single rag.exe)
 # Usage:
 #   .\verify_install.ps1
@@ -33,7 +33,7 @@ function Skip($name, $reason) {
 Write-Host @"
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   Ragnarok v2.2.4 - Installation Verification                 ║
+║   Ragnarok v3.1.0 - Installation Verification                 ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
 "@ -ForegroundColor Cyan

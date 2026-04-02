@@ -23,6 +23,8 @@ func NewDB(path string) (*sql.DB, error) {
 	}
 
 	db.Exec("PRAGMA foreign_keys = ON")
+	db.Exec("PRAGMA synchronous = FULL")
+	db.Exec("PRAGMA journal_mode = DELETE")
 
 	return db, nil
 }

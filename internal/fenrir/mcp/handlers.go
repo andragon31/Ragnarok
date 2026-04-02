@@ -7,9 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andragon31/Ragnarok/internal/fenrir/graph"
 	"github.com/andragon31/Ragnarok/internal/fenrir/memory"
 	"github.com/andragon31/Ragnarok/internal/fenrir/specs"
+)
+
+const (
+	errFailedParseParams = "failed to parse params: %w"
 )
 
 func (s *Server) handleSessionStart(ctx context.Context, req *Request) (*Response, error) {
@@ -21,7 +24,7 @@ func (s *Server) handleSessionStart(ctx context.Context, req *Request) (*Respons
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	session := &memory.Session{
@@ -62,37 +65,26 @@ func (s *Server) handleSessionStart(ctx context.Context, req *Request) (*Respons
 }
 
 func (s *Server) handleMemSave(ctx context.Context, req *Request) (*Response, error) {
-	var params struct {
-		SessionID string   `json:"session_id"`
-		Type      string   `json:"type"`
-		Content   string   `json:"content"`
-		Module    string   `json:"module,omitempty"`
-		File      string   `json:"file,omitempty"`
-		Line      int      `json:"line,omitempty"`
-		Tags      []string `json:"tags,omitempty"`
-		Authority string   `json:"authority,omitempty"`
-	}
-
+	var params map[string]interface{}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	obs := &memory.Observation{
 		ID:        generateID("obs"),
-		SessionID: params.SessionID,
-		Type:      params.Type,
-		Content:   params.Content,
-		Module:    params.Module,
-		File:      params.File,
-		Line:      params.Line,
-		Tags:      params.Tags,
-		Authority: params.Authority,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
+	s.extractObservationFields(obs, params)
+
 	if obs.Authority == "" {
 		obs.Authority = "exploratory"
+	}
+
+	if len(params) > 0 {
+		metaJSON, _ := json.Marshal(params)
+		obs.Metadata = string(metaJSON)
 	}
 
 	store := memory.NewMemoryStore(s.db)
@@ -100,12 +92,7 @@ func (s *Server) handleMemSave(ctx context.Context, req *Request) (*Response, er
 		return nil, fmt.Errorf("failed to save observation: %w", err)
 	}
 
-	if s.config.SemanticSearch {
-		gStore := graph.NewGraphStore(s.db)
-		gStore.AddNode(obs.ID, obs.Type, obs.Type, obs.Content, map[string]string{
-			"module": obs.Module,
-		})
-	}
+	// Graph store removed — FTS5 search handles retrieval
 
 	return &Response{
 		Result: map[string]interface{}{
@@ -115,6 +102,45 @@ func (s *Server) handleMemSave(ctx context.Context, req *Request) (*Response, er
 			"created_at": obs.CreatedAt,
 		},
 	}, nil
+}
+
+func (s *Server) extractObservationFields(obs *memory.Observation, params map[string]interface{}) {
+	if v, ok := params["session_id"].(string); ok {
+		obs.SessionID = v
+		delete(params, "session_id")
+	}
+	if v, ok := params["type"].(string); ok {
+		obs.Type = v
+		delete(params, "type")
+	}
+	if v, ok := params["content"].(string); ok {
+		obs.Content = v
+		delete(params, "content")
+	}
+	if v, ok := params["module"].(string); ok {
+		obs.Module = v
+		delete(params, "module")
+	}
+	if v, ok := params["file"].(string); ok {
+		obs.File = v
+		delete(params, "file")
+	}
+	if v, ok := params["line"].(float64); ok {
+		obs.Line = int(v)
+		delete(params, "line")
+	}
+	if v, ok := params["authority"].(string); ok {
+		obs.Authority = v
+		delete(params, "authority")
+	}
+	if v, ok := params["tags"].([]interface{}); ok {
+		for _, t := range v {
+			if ts, ok := t.(string); ok {
+				obs.Tags = append(obs.Tags, ts)
+			}
+		}
+		delete(params, "tags")
+	}
 }
 
 func (s *Server) handleMemFind(ctx context.Context, req *Request) (*Response, error) {
@@ -127,7 +153,7 @@ func (s *Server) handleMemFind(ctx context.Context, req *Request) (*Response, er
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Limit == 0 {
@@ -135,59 +161,23 @@ func (s *Server) handleMemFind(ctx context.Context, req *Request) (*Response, er
 	}
 
 	store := memory.NewMemoryStore(s.db)
-	graphStore := graph.NewGraphStore(s.db)
 
-	var results []*graph.ContextResult
-	var err error
-
-	if s.config.SemanticSearch && params.Module != "" {
-		results, err = graphStore.SearchContext(params.Query, params.Module, params.Limit)
-	} else {
-		results, err = graphStore.SearchContext(params.Query, "", params.Limit)
-	}
-
+	observations, err := store.Search(params.Query, params.Limit)
 	if err != nil {
-		graphErr := err
-		observations, err := store.Search(params.Query, params.Limit)
-		if err != nil {
-			return nil, fmt.Errorf("graph search failed: %v, fallback search failed: %w", graphErr, err)
-		}
-
-		resultItems := make([]map[string]interface{}, 0, len(observations))
-		for _, obs := range observations {
-			item := map[string]interface{}{
-				"id":         obs.ID,
-				"type":       obs.Type,
-				"module":     obs.Module,
-				"authority":  obs.Authority,
-				"created_at": obs.CreatedAt,
-			}
-			if params.IncludeContent {
-				item["content"] = obs.Content
-			}
-			resultItems = append(resultItems, item)
-		}
-
-		return &Response{
-			Result: map[string]interface{}{
-				"query":   params.Query,
-				"results": resultItems,
-				"count":   len(resultItems),
-			},
-		}, nil
+		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
-	resultItems := make([]map[string]interface{}, 0, len(results))
-	for _, r := range results {
+	resultItems := make([]map[string]interface{}, 0, len(observations))
+	for _, obs := range observations {
 		item := map[string]interface{}{
-			"id":         r.ID,
-			"type":       r.Type,
-			"module":     r.Module,
-			"authority":  r.Authority,
-			"created_at": r.CreatedAt,
+			"id":         obs.ID,
+			"type":       obs.Type,
+			"module":     obs.Module,
+			"authority":  obs.Authority,
+			"created_at": obs.CreatedAt,
 		}
 		if params.IncludeContent {
-			item["content"] = r.Content
+			item["content"] = obs.Content
 		}
 		resultItems = append(resultItems, item)
 	}
@@ -208,7 +198,7 @@ func (s *Server) handleMemContext(ctx context.Context, req *Request) (*Response,
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Limit == 0 {
@@ -238,7 +228,7 @@ func (s *Server) handleMemTimeline(ctx context.Context, req *Request) (*Response
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Limit == 0 {
@@ -295,7 +285,7 @@ func (s *Server) handleSpecSave(ctx context.Context, req *Request) (*Response, e
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	spec := &specs.Spec{
@@ -340,7 +330,7 @@ func (s *Server) handleSpecList(ctx context.Context, req *Request) (*Response, e
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Limit == 0 {
@@ -368,7 +358,7 @@ func (s *Server) handleSpecCheck(ctx context.Context, req *Request) (*Response, 
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	store := specs.NewSpecStore(s.db)
@@ -409,7 +399,7 @@ func (s *Server) handleIncidentLog(ctx context.Context, req *Request) (*Response
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Severity == "" {
@@ -451,7 +441,7 @@ func (s *Server) handleIncidentList(ctx context.Context, req *Request) (*Respons
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Limit == 0 {
@@ -479,7 +469,7 @@ func (s *Server) handleIncidentResolve(ctx context.Context, req *Request) (*Resp
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	store := memory.NewMemoryStore(s.db)
@@ -506,7 +496,7 @@ func (s *Server) handleConflictList(ctx context.Context, req *Request) (*Respons
 	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return nil, fmt.Errorf("failed to parse params: %w", err)
+		return nil, fmt.Errorf(errFailedParseParams, err)
 	}
 
 	if params.Limit == 0 {
@@ -601,4 +591,27 @@ func generateID(prefix string) string {
 	defer idMutex.Unlock()
 	idCounter++
 	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), idCounter)
+}
+func (s *Server) handleMemProjectSummary(ctx context.Context, req *Request) (*Response, error) {
+	var params struct {
+		Days int `json:"days,omitempty"`
+	}
+
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, fmt.Errorf(errFailedParseParams, err)
+	}
+
+	if params.Days == 0 {
+		params.Days = 7 // Default to last 7 days
+	}
+
+	store := memory.NewMemoryStore(s.db)
+	summary, err := store.GetProjectSummary(params.Days)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project summary: %w", err)
+	}
+
+	return &Response{
+		Result: summary,
+	}, nil
 }

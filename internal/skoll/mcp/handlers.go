@@ -58,6 +58,10 @@ func (s *Server) handleSkillLoad(ctx context.Context, req *Request) (*Response, 
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.SkillName == "" {
+		return nil, fmt.Errorf("skill_name is required")
+	}
+
 	skill, err := s.skillLoader.LoadSkillFull(params.SkillName)
 	if err != nil {
 		return &Response{
@@ -152,6 +156,10 @@ func (s *Server) handleSkillVersionCheck(ctx context.Context, req *Request) (*Re
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.SkillName == "" {
+		return nil, fmt.Errorf("skill_name is required")
+	}
+
 	skill, err := s.skillLoader.LoadSkillIndex(params.SkillName)
 	if err != nil {
 		return &Response{
@@ -190,6 +198,10 @@ func (s *Server) handleSkillVerify(ctx context.Context, req *Request) (*Response
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.SkillName == "" {
+		return nil, fmt.Errorf("skill_name is required")
 	}
 
 	skill, err := s.skillLoader.LoadSkillIndex(params.SkillName)
@@ -261,6 +273,10 @@ func (s *Server) handleAgentActivate(ctx context.Context, req *Request) (*Respon
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.AgentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
 	}
 
 	agentsMdContext := ""
@@ -393,6 +409,10 @@ func (s *Server) handleAgentContext(ctx context.Context, req *Request) (*Respons
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.AgentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+
 	query := `SELECT name, role, scope, skills, allowed_tools FROM agents WHERE id = ?`
 	var name, role, scope *string
 	var skillsJSON, allowedToolsJSON *string
@@ -431,6 +451,10 @@ func (s *Server) handleAgentHandoff(ctx context.Context, req *Request) (*Respons
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.ToAgent == "" {
+		return nil, fmt.Errorf("to (to_agent) is required")
 	}
 
 	return &Response{
@@ -562,6 +586,10 @@ func (s *Server) handleRuleGet(ctx context.Context, req *Request) (*Response, er
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.RuleID == "" {
+		return nil, fmt.Errorf("rule_id is required")
 	}
 
 	query := `SELECT id, name, category, content, severity, status, created_at FROM rules WHERE id = ?`
@@ -1151,6 +1179,10 @@ func (s *Server) handleSkillsImport(ctx context.Context, req *Request) (*Respons
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.Source == "" {
+		return nil, fmt.Errorf("source is required")
+	}
+
 	client := skillsmp.NewClient()
 
 	if params.Source == "github" && params.URL != "" {
@@ -1262,6 +1294,10 @@ func (s *Server) handleSkillsUpdate(ctx context.Context, req *Request) (*Respons
 		return nil, fmt.Errorf("failed to parse params: %w", err)
 	}
 
+	if params.SkillName == "" {
+		return nil, fmt.Errorf("skill_name is required")
+	}
+
 	return &Response{
 		Result: map[string]interface{}{
 			"skill_name": params.SkillName,
@@ -1279,6 +1315,10 @@ func (s *Server) handleApiDocsCheck(ctx context.Context, req *Request) (*Respons
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse params: %w", err)
+	}
+
+	if params.Endpoint == "" {
+		return nil, fmt.Errorf("endpoint is required")
 	}
 
 	return &Response{

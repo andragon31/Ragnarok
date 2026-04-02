@@ -51,6 +51,7 @@ func (s *Server) registerHandlers() {
 	s.handlers["mem_timeline"] = s.handleMemTimeline
 	s.handlers["mem_stats"] = s.handleStats
 	s.handlers["mem_session_end"] = s.handleMemSessionEnd
+	s.handlers["mem_project_summary"] = s.handleMemProjectSummary
 	s.handlers["mem_save_prompt"] = s.handleMemSavePrompt
 	s.handlers["mem_session_checkpoint"] = s.handleMemSessionCheckpoint
 	s.handlers["mem_get_observation"] = s.handleMemGetObservation

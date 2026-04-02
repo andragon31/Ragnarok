@@ -1,67 +1,47 @@
-# Ragnarok Ecosystem Makefile
+# Ragnarok Makefile
 
-VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS  := -ldflags="-s -w -X main.version=$(VERSION)"
-BIN_DIR  := bin
+BINARY_NAME=rag
+MOD_DIRECTORIES=./cmd/fenrir ./cmd/hati ./cmd/skoll ./cmd/tyr ./cmd/rag
 
-ifeq ($(OS),Windows_NT)
-    BINARY := $(BIN_DIR)/rag.exe
-    INSTALL_DIR := $(LOCALAPPDATA)\Ragnarok
-else
-    BINARY := $(BIN_DIR)/rag
-    INSTALL_DIR := $(HOME)/.local/bin
-endif
+.PHONY: all build build-all test clean doctor release help lint
 
-.PHONY: all build test clean install lint release help
-
-all: build
+all: build test
 
 build:
-	@echo "Building Ragnarok $(VERSION)..."
-	@mkdir -p $(BIN_DIR)
-	go build $(LDFLAGS) -o $(BINARY) ./cmd/rag
-	@echo "Built: $(BINARY)"
+	go build -v -o $(BINARY_NAME) ./cmd/rag/main.go
 
 build-all:
-	@echo "Cross-compiling for all platforms..."
-	@mkdir -p $(BIN_DIR)
-	GOOS=linux   GOARCH=amd64  go build $(LDFLAGS) -o $(BIN_DIR)/rag_linux_amd64   ./cmd/rag
-	GOOS=linux   GOARCH=arm64  go build $(LDFLAGS) -o $(BIN_DIR)/rag_linux_arm64   ./cmd/rag
-	GOOS=darwin  GOARCH=amd64  go build $(LDFLAGS) -o $(BIN_DIR)/rag_darwin_amd64  ./cmd/rag
-	GOOS=darwin  GOARCH=arm64  go build $(LDFLAGS) -o $(BIN_DIR)/rag_darwin_arm64  ./cmd/rag
-	GOOS=windows GOARCH=amd64  go build $(LDFLAGS) -o $(BIN_DIR)/rag_windows_amd64.exe ./cmd/rag
+	@echo "Building all modules..."
+	go build -v -o fenrir ./cmd/fenrir/main.go
+	go build -v -o hati ./cmd/hati/main.go
+	go build -v -o skoll ./cmd/skoll/main.go
+	go build -v -o tyr ./cmd/tyr/main.go
+	go build -v -o rag ./cmd/rag/main.go
 
 test:
-	go test ./...
+	go test -v -race ./...
 
-lint:
-	go vet ./...
+doctor: build
+	./$(BINARY_NAME) mcp diagnose --verbose
 
 clean:
-	rm -rf $(BIN_DIR)
-
-install: build
-	@echo "Installing to $(INSTALL_DIR)..."
-	@mkdir -p $(INSTALL_DIR)
-	cp $(BINARY) $(INSTALL_DIR)/
-	@echo "Installed"
-
-deps:
-	go mod tidy
+	@echo "Cleaning binaries..."
+	rm -f fenrir hati skoll tyr rag
+	rm -f *.exe
+	rm -rf dist/
 
 release:
-	@echo "Creating release $(VERSION)..."
-	goreleaser release --clean
+	goreleaser release --snapshot --clean
+
+lint:
+	golangci-lint run
 
 help:
-	@echo "Ragnarok $(VERSION) - AI Governance & Autonomous Development Ecosystem"
-	@echo ""
-	@echo "Targets:"
-	@echo "  build       Build for current platform"
-	@echo "  build-all   Cross-compile for all platforms"
-	@echo "  test        Run all tests"
-	@echo "  lint        Run go vet"
-	@echo "  clean       Remove build artifacts"
-	@echo "  install     Build and install locally"
-	@echo "  deps        Download dependencies"
-	@echo "  release     Create GoReleaser release"
+	@echo "Ragnarok v3 Build System"
+	@echo "  build       - Build the unified 'rag' binary"
+	@echo "  build-all   - Build all 5 standalone binaries"
+	@echo "  test        - Run all tests with race detection"
+	@echo "  doctor      - Run ecosystem diagnostics"
+	@echo "  clean       - Remove all binaries and artifacts"
+	@echo "  release     - Create a snapshot release with goreleaser"
+	@echo "  lint        - Run golangci-lint"

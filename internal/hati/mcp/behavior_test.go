@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -397,4 +398,496 @@ func resultToMap(result any) map[string]any {
 	var m map[string]any
 	json.Unmarshal(b, &m)
 	return m
+}
+
+func TestPlanList(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	for i := 1; i <= 3; i++ {
+		planParams := map[string]interface{}{
+			"title": fmt.Sprintf("Test Plan %d", i),
+		}
+		planParamsJSON := marshalParams(planParams)
+		planReq := &Request{
+			Method: "plan_create",
+			Params: planParamsJSON,
+		}
+		_, err := srv.handlers["plan_create"](ctx, planReq)
+		if err != nil {
+			t.Fatalf("plan_create %d failed: %v", i, err)
+		}
+	}
+
+	listParams := map[string]interface{}{}
+	listParamsJSON := marshalParams(listParams)
+	listReq := &Request{
+		Method: "plan_list",
+		Params: listParamsJSON,
+	}
+
+	listResult, err := srv.handlers["plan_list"](ctx, listReq)
+	if err != nil {
+		t.Fatalf("plan_list failed: %v", err)
+	}
+
+	listResultMap := listResult.Result.(map[string]interface{})
+	plansRaw := listResultMap["plans"]
+	plans, ok := plansRaw.([]*Plan)
+	if !ok {
+		t.Fatalf("plans type mismatch: %T", plansRaw)
+	}
+
+	if len(plans) != 3 {
+		t.Errorf("expected 3 plans, got %d", len(plans))
+	}
+}
+
+func TestTaskCreateAndList(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	planParams := map[string]interface{}{
+		"title": "Task Test Plan",
+	}
+	planParamsJSON := marshalParams(planParams)
+	planReq := &Request{
+		Method: "plan_create",
+		Params: planParamsJSON,
+	}
+	planResult, err := srv.handlers["plan_create"](ctx, planReq)
+	if err != nil {
+		t.Fatalf("plan_create failed: %v", err)
+	}
+	planResultMap := planResult.Result.(map[string]interface{})
+	planID := planResultMap["id"].(string)
+
+	phaseParams := map[string]interface{}{
+		"plan_id":   planID,
+		"title":     "Phase 1",
+		"order_num": 1,
+	}
+	phaseParamsJSON := marshalParams(phaseParams)
+	phaseReq := &Request{
+		Method: "phase_create",
+		Params: phaseParamsJSON,
+	}
+	phaseResult, err := srv.handlers["phase_create"](ctx, phaseReq)
+	if err != nil {
+		t.Fatalf("phase_create failed: %v", err)
+	}
+	phaseResultMap := phaseResult.Result.(map[string]interface{})
+	phaseID := phaseResultMap["id"].(string)
+
+	taskParams := map[string]interface{}{
+		"phase_id": phaseID,
+		"title":    "Test Task 1",
+		"priority": 1,
+	}
+	taskParamsJSON := marshalParams(taskParams)
+	taskReq := &Request{
+		Method: "task_create",
+		Params: taskParamsJSON,
+	}
+	taskResult, err := srv.handlers["task_create"](ctx, taskReq)
+	if err != nil {
+		t.Fatalf("task_create failed: %v", err)
+	}
+	taskResultMap := taskResult.Result.(map[string]interface{})
+
+	if taskResultMap["title"] != "Test Task 1" {
+		t.Errorf("expected title 'Test Task 1', got %v", taskResultMap["title"])
+	}
+
+	listParams := map[string]interface{}{
+		"plan_id": planID,
+	}
+	listParamsJSON := marshalParams(listParams)
+	listReq := &Request{
+		Method: "task_list",
+		Params: listParamsJSON,
+	}
+
+	_, err = srv.handlers["task_list"](ctx, listReq)
+	if err != nil {
+		t.Fatalf("task_list failed: %v", err)
+	}
+}
+
+func TestTaskGetNext(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	planParams := map[string]interface{}{
+		"title": "Task GetNext Test Plan",
+	}
+	planParamsJSON := marshalParams(planParams)
+	planReq := &Request{
+		Method: "plan_create",
+		Params: planParamsJSON,
+	}
+	planResult, err := srv.handlers["plan_create"](ctx, planReq)
+	if err != nil {
+		t.Fatalf("plan_create failed: %v", err)
+	}
+	planResultMap := planResult.Result.(map[string]interface{})
+	planID := planResultMap["id"].(string)
+
+	phaseParams := map[string]interface{}{
+		"plan_id":   planID,
+		"title":     "Phase 1",
+		"order_num": 1,
+	}
+	phaseParamsJSON := marshalParams(phaseParams)
+	phaseReq := &Request{
+		Method: "phase_create",
+		Params: phaseParamsJSON,
+	}
+	_, err = srv.handlers["phase_create"](ctx, phaseReq)
+	if err != nil {
+		t.Fatalf("phase_create failed: %v", err)
+	}
+
+	getNextParams := map[string]interface{}{
+		"plan_id": planID,
+	}
+	getNextParamsJSON := marshalParams(getNextParams)
+	getNextReq := &Request{
+		Method: "task_get_next",
+		Params: getNextParamsJSON,
+	}
+
+	_, err = srv.handlers["task_get_next"](ctx, getNextReq)
+	if err != nil {
+		t.Fatalf("task_get_next failed: %v", err)
+	}
+}
+
+func TestTaskUpdate(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	planParams := map[string]interface{}{
+		"title": "Task Update Test Plan",
+	}
+	planParamsJSON := marshalParams(planParams)
+	planReq := &Request{
+		Method: "plan_create",
+		Params: planParamsJSON,
+	}
+	planResult, err := srv.handlers["plan_create"](ctx, planReq)
+	if err != nil {
+		t.Fatalf("plan_create failed: %v", err)
+	}
+	planResultMap := planResult.Result.(map[string]interface{})
+	planID := planResultMap["id"].(string)
+
+	phaseParams := map[string]interface{}{
+		"plan_id":   planID,
+		"title":     "Phase 1",
+		"order_num": 1,
+	}
+	phaseParamsJSON := marshalParams(phaseParams)
+	phaseReq := &Request{
+		Method: "phase_create",
+		Params: phaseParamsJSON,
+	}
+	phaseResult, err := srv.handlers["phase_create"](ctx, phaseReq)
+	if err != nil {
+		t.Fatalf("phase_create failed: %v", err)
+	}
+	phaseResultMap := phaseResult.Result.(map[string]interface{})
+	phaseID := phaseResultMap["id"].(string)
+
+	taskParams := map[string]interface{}{
+		"phase_id": phaseID,
+		"title":    "Test Task",
+		"priority": 1,
+	}
+	taskParamsJSON := marshalParams(taskParams)
+	taskReq := &Request{
+		Method: "task_create",
+		Params: taskParamsJSON,
+	}
+	taskResult, err := srv.handlers["task_create"](ctx, taskReq)
+	if err != nil {
+		t.Fatalf("task_create failed: %v", err)
+	}
+	taskResultMap := taskResult.Result.(map[string]interface{})
+	taskID := taskResultMap["id"].(string)
+
+	updateParams := map[string]interface{}{
+		"task_id": taskID,
+		"status":  "in_progress",
+	}
+	updateParamsJSON := marshalParams(updateParams)
+	updateReq := &Request{
+		Method: "task_update",
+		Params: updateParamsJSON,
+	}
+
+	updateResult, err := srv.handlers["task_update"](ctx, updateReq)
+	if err != nil {
+		t.Fatalf("task_update failed: %v", err)
+	}
+
+	updateResultMap := updateResult.Result.(map[string]interface{})
+	if updateResultMap["status"] != "in_progress" {
+		t.Errorf("expected status 'in_progress', got %v", updateResultMap["status"])
+	}
+}
+
+func TestPlanProgress(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	planParams := map[string]interface{}{
+		"title": "Progress Test Plan",
+	}
+	planParamsJSON := marshalParams(planParams)
+	planReq := &Request{
+		Method: "plan_create",
+		Params: planParamsJSON,
+	}
+	planResult, err := srv.handlers["plan_create"](ctx, planReq)
+	if err != nil {
+		t.Fatalf("plan_create failed: %v", err)
+	}
+	planResultMap := planResult.Result.(map[string]interface{})
+	planID := planResultMap["id"].(string)
+
+	progressParams := map[string]interface{}{
+		"plan_id": planID,
+	}
+	progressParamsJSON := marshalParams(progressParams)
+	progressReq := &Request{
+		Method: "plan_progress",
+		Params: progressParamsJSON,
+	}
+
+	progressResult, err := srv.handlers["plan_progress"](ctx, progressReq)
+	if err != nil {
+		t.Fatalf("plan_progress failed: %v", err)
+	}
+
+	progressResultMap := progressResult.Result.(map[string]interface{})
+	if progressResultMap["plan_id"] != planID {
+		t.Errorf("expected plan_id %s, got %v", planID, progressResultMap["plan_id"])
+	}
+}
+
+func TestPlanDependencies(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	planParams := map[string]interface{}{
+		"title": "Dependencies Test Plan",
+	}
+	planParamsJSON := marshalParams(planParams)
+	planReq := &Request{
+		Method: "plan_create",
+		Params: planParamsJSON,
+	}
+	planResult, err := srv.handlers["plan_create"](ctx, planReq)
+	if err != nil {
+		t.Fatalf("plan_create failed: %v", err)
+	}
+	planResultMap := planResult.Result.(map[string]interface{})
+	planID := planResultMap["id"].(string)
+
+	depsParams := map[string]interface{}{
+		"plan_id": planID,
+	}
+	depsParamsJSON := marshalParams(depsParams)
+	depsReq := &Request{
+		Method: "plan_dependencies",
+		Params: depsParamsJSON,
+	}
+
+	depsResult, err := srv.handlers["plan_dependencies"](ctx, depsReq)
+	if err != nil {
+		t.Fatalf("plan_dependencies failed: %v", err)
+	}
+
+	depsResultMap := depsResult.Result.(map[string]interface{})
+	if depsResultMap["plan_id"] != planID {
+		t.Errorf("expected plan_id %s, got %v", planID, depsResultMap["plan_id"])
+	}
+}
+
+func TestQualitySnapshot(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	snapshotParams := map[string]interface{}{}
+	snapshotParamsJSON := marshalParams(snapshotParams)
+	snapshotReq := &Request{
+		Method: "quality_snapshot",
+		Params: snapshotParamsJSON,
+	}
+
+	snapshotResult, err := srv.handlers["quality_snapshot"](ctx, snapshotReq)
+	if err != nil {
+		t.Fatalf("quality_snapshot failed: %v", err)
+	}
+
+	snapshotResultMap := snapshotResult.Result.(map[string]interface{})
+	if snapshotResultMap["source"] != "tyr" {
+		t.Errorf("expected source 'tyr', got %v", snapshotResultMap["source"])
+	}
+}
+
+func TestSpecImpact(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	planParams := map[string]interface{}{
+		"title": "Spec Impact Test Plan",
+	}
+	planParamsJSON := marshalParams(planParams)
+	planReq := &Request{
+		Method: "plan_create",
+		Params: planParamsJSON,
+	}
+	planResult, err := srv.handlers["plan_create"](ctx, planReq)
+	if err != nil {
+		t.Fatalf("plan_create failed: %v", err)
+	}
+	planResultMap := planResult.Result.(map[string]interface{})
+	planID := planResultMap["id"].(string)
+
+	impactParams := map[string]interface{}{
+		"plan_id": planID,
+	}
+	impactParamsJSON := marshalParams(impactParams)
+	impactReq := &Request{
+		Method: "spec_impact",
+		Params: impactParamsJSON,
+	}
+
+	impactResult, err := srv.handlers["spec_impact"](ctx, impactReq)
+	if err != nil {
+		t.Fatalf("spec_impact failed: %v", err)
+	}
+
+	impactResultMap := impactResult.Result.(map[string]interface{})
+	if impactResultMap["plan_id"] != planID {
+		t.Errorf("expected plan_id %s, got %v", planID, impactResultMap["plan_id"])
+	}
+}
+
+func TestPhaseUpdate(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	planParams := map[string]interface{}{
+		"title": "Phase Update Test Plan",
+	}
+	planParamsJSON := marshalParams(planParams)
+	planReq := &Request{
+		Method: "plan_create",
+		Params: planParamsJSON,
+	}
+	planResult, err := srv.handlers["plan_create"](ctx, planReq)
+	if err != nil {
+		t.Fatalf("plan_create failed: %v", err)
+	}
+	planResultMap := planResult.Result.(map[string]interface{})
+	planID := planResultMap["id"].(string)
+
+	phaseParams := map[string]interface{}{
+		"plan_id":   planID,
+		"title":     "Phase 1",
+		"order_num": 1,
+	}
+	phaseParamsJSON := marshalParams(phaseParams)
+	phaseReq := &Request{
+		Method: "phase_create",
+		Params: phaseParamsJSON,
+	}
+	phaseResult, err := srv.handlers["phase_create"](ctx, phaseReq)
+	if err != nil {
+		t.Fatalf("phase_create failed: %v", err)
+	}
+	phaseResultMap := phaseResult.Result.(map[string]interface{})
+	phaseID := phaseResultMap["id"].(string)
+
+	updateParams := map[string]interface{}{
+		"phase_id": phaseID,
+		"status":   "completed",
+	}
+	updateParamsJSON := marshalParams(updateParams)
+	updateReq := &Request{
+		Method: "phase_update",
+		Params: updateParamsJSON,
+	}
+
+	updateResult, err := srv.handlers["phase_update"](ctx, updateReq)
+	if err != nil {
+		t.Fatalf("phase_update failed: %v", err)
+	}
+
+	updateResultMap := updateResult.Result.(map[string]interface{})
+	if updateResultMap["status"] != "completed" {
+		t.Errorf("expected status 'completed', got %v", updateResultMap["status"])
+	}
+}
+
+func TestPlanActivate(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	planParams := map[string]interface{}{
+		"title": "Activate Test Plan",
+	}
+	planParamsJSON := marshalParams(planParams)
+	planReq := &Request{
+		Method: "plan_create",
+		Params: planParamsJSON,
+	}
+	planResult, err := srv.handlers["plan_create"](ctx, planReq)
+	if err != nil {
+		t.Fatalf("plan_create failed: %v", err)
+	}
+	planResultMap := planResult.Result.(map[string]interface{})
+	planID := planResultMap["id"].(string)
+
+	activateParams := map[string]interface{}{
+		"plan_id": planID,
+	}
+	activateParamsJSON := marshalParams(activateParams)
+	activateReq := &Request{
+		Method: "plan_activate",
+		Params: activateParamsJSON,
+	}
+
+	activateResult, err := srv.handlers["plan_activate"](ctx, activateReq)
+	if err != nil {
+		t.Fatalf("plan_activate failed: %v", err)
+	}
+
+	activateResultMap := activateResult.Result.(map[string]interface{})
+	if activateResultMap["status"] != "active" {
+		t.Errorf("expected status 'active', got %v", activateResultMap["status"])
+	}
 }

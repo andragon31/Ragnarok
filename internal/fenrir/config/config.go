@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/andragon31/Ragnarok/internal/version"
 )
 
 type Config struct {
@@ -59,7 +61,7 @@ func DefaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
 		Project:         "unnamed-project",
-		Version:         "1.0.0",
+		Version:         version.Version,
 		Port:            7438,
 		DataDir:         filepath.Join(home, ".fenrir"),
 		LogLevel:        "info",

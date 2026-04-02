@@ -12,13 +12,14 @@ import (
 	"github.com/andragon31/Ragnarok/internal/tyr/config"
 	"github.com/andragon31/Ragnarok/internal/tyr/database"
 	"github.com/andragon31/Ragnarok/internal/tyr/mcp"
+	version "github.com/andragon31/Ragnarok/internal/version"
 )
 
-var version = "2.2.3"
+var v = version.Version
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Printf("Tyr v%s\n", version)
+		fmt.Printf("Tyr v%s\n", v)
 		fmt.Println("Security, Validation & Standards Layer")
 		return
 	}
@@ -48,7 +49,7 @@ func main() {
 		}
 		runInit(*initProject, *configDir)
 	case "version":
-		fmt.Printf("Tyr v%s\n", version)
+		fmt.Printf("Tyr v%s\n", v)
 	default:
 		printUsage()
 		os.Exit(1)
@@ -56,22 +57,21 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`Tyr v1.0.0 - Security, Validation & Standards Layer
-
-Usage:
-  tyr serve [--port PORT] [--dir DIR]
-  tyr init --project NAME [--dir DIR]
-  tyr version
-
-Commands:
-  serve    Start the MCP server
-  init     Initialize a new project
-  mcp      Run in MCP mode (stdio)
-  version  Show version
-
-Examples:
-  tyr serve --port 7440
-  tyr init --project "my-project"`)
+	fmt.Printf("Tyr v%s - Security, Validation & Standards Layer\n\n", v)
+	fmt.Println("Usage:")
+	fmt.Println("  tyr serve [--port PORT] [--dir DIR]")
+	fmt.Println("  tyr init --project NAME [--dir DIR]")
+	fmt.Println("  tyr version")
+	fmt.Println("")
+	fmt.Println("Commands:")
+	fmt.Println("  serve    Start the MCP server")
+	fmt.Println("  init     Initialize a new project")
+	fmt.Println("  mcp      Run in MCP mode (stdio)")
+	fmt.Println("  version  Show version")
+	fmt.Println("")
+	fmt.Println("Examples:")
+	fmt.Println("  tyr serve --port 7440")
+	fmt.Println("  tyr init --project \"my-project\"")
 }
 
 func runServe(port int, dataDir string) {
